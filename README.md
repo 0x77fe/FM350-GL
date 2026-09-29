@@ -2,7 +2,7 @@
 
 ImmortalWrt 24.10 / 25.12 上的 Fibocom FM350-GL 5G 模组管理器：**拨号生命周期的唯一 owner + 分级自动恢复 + 模块全自动发现 + LuCI2 中文管理界面**。
 
-面向的固件缺陷（本模块固件层面无法修复）：每 1~3 小时随机 USB 断开/假死（AT 与 PDP 活着但数据面冻结）；运行久后 IPv6 不自动刷新（IPv4 正常、IPv6 失效）；模块可能被拔线/移位。本管理器将上述问题的**感知、分级恢复、配置化**全部自动化。
+面向的固件缺陷（本模块固件层面无法修复）：随机 USB 断开/假死（AT 与 PDP 活着但数据面冻结）；运行久后 IPv6 不自动刷新（IPv4 正常、IPv6 失效）；模块可能被拔线/移位。本管理器将上述问题的**感知、分级恢复、配置化**全部自动化。
 
 | 项 | 值 |
 |---|---|
@@ -11,11 +11,10 @@ ImmortalWrt 24.10 / 25.12 上的 Fibocom FM350-GL 5G 模组管理器：**拨号�
 | 数据面 | RNDIS → `eth2`（netifd 静态 v4 + dhcpv6/odhcp6c） |
 | 包名 | `luci-app-fm350`（当前 r36）；离线安装按体系分两份：`dist/deps-ipk/`（24.10 · opkg）、`dist/deps-apk/`（25.12+ · apk） |
 | 业务链路 | AT 口 `/dev/ttyUSB1`（自动探测）、APN ctnet、PDP ipv4v6、上下文 3 |
-| 许可证 | **GPL-3.0-only**（`LICENSE`；为什么不是 MIT 见 [docs/licenses.md](docs/licenses.md)） |
 
 ---
 
-# 第一部分 · 完整工作原理
+# 完整工作原理
 
 ## 1.1 组件架构
 
@@ -301,85 +300,3 @@ ssh root@<router> "sh /tmp/deps-apk/install_all.sh"
 > 主包由 `sh build/build-apk.sh` 产出。ipk 侧同理，kmod 必须与固件内核 ABI 完全一致。
 
 ---
-
-# 第二部分 · 未来兼容性评估（其它厂商 / 型号 5G 模块）
-
-**评估依据**：① 本项目源码的厂商耦合点静态清点（grep 实测）；② 参考文件 `baseline/modem_support.json`（ImmortalWrt luci-app-modem 1.4.4 机型库：**19 个 USB 机型 + 8 个 PCIe 机型**）与 `baseline/{quectel,meig,simcom,fibocom}.sh` 的厂商命令事实（`baseline/` 为第三方参考件，仅本地保留，未入库）。
-
-## 2.1 结论
-
-项目约 **85% 的代码是厂商无关的通用底座**（自动识别、分级恢复、IPv6 刷新、冻结检测、快照/UI、打包与离线依赖），换厂商只需替换极少量"厂商私有命令"；**硬边界是数据面形态：仅支持 USB 以太网类（RNDIS / ECM / NCM），不支持 QMI / MBIM 协议模式与 PCIe/MHI 形态**。
-
-## 2.2 厂商耦合点清点（实测）
-
-| 部件 | 内容 | 判定 |
-|---|---|---|
-| 拨号主序列 | `AT+COPS=0,0` → `AT+CGDCONT=<cid>,"<pdp>","<apn>"` → `AT+CGACT=1,<cid>` | **3GPP 标准，全厂商通用** |
-| 地址权威值 | `AT+CGPADDR=<cid>` | **3GPP 标准，全厂商通用** |
-| AT 口探测 | `ATI` 应答匹配 `OK\|FM350\|Fibocom\|Manufacturer`（`OK/Manufacturer` 为通用词） | 通用性高 |
-| 数据面搭建 | netifd 静态 v4 + dhcpv6/odhcp6c + 自动发现 eth 网卡 | RNDIS/ECM/NCM 三种形态通用 |
-| 恢复体系 | USB 复位、冻结检测、IPv6 刷新、自动识别 | **完全厂商无关** |
-| 厂商私有（全部可降级） | `AT+GTDNS`（DNS，有公共兜底）、`AT+GTCCINFO`（信号/小区，仅展示）、`GTAUTODHCP/GTIPPASS/GTAUTOCONNECT` 预设（默认关） | **不影响上网主链路** |
-
-## 2.3 兼容分档与型号清单（19 个 USB 机型全量映射）
-
-### A 档 · 原生 / 近零改动（≤2 行）
-
-Fibocom 全平台私有命令族同源（`GT*` 命令），拨号触发沿用 `AT+GTRNDIS`：
-
-| 型号 | 平台/模式 | 说明 |
-|---|---|---|
-| **FM350-GL**（现役） | mediatek / rndis | 当前实现的目标 |
-| **FM650-CN** | unisoc / ecm·mbim·rndis·ncm | 切 ECM/RNDIS 后可用（同 GT 命令族） |
-| **FM150-AE / FM160-CN** | qualcomm / 多模式 | 切 ECM/RNDIS 后可用；ECM 下加一条 `AT+GTRNDIS` 分支 |
-
-### B 档 · 小改即可兼容（1~3 行拨号命令；模块需处于 ECM/RNDIS/NCM 模式）
-
-| 厂商 | 型号（机型库实测） | 需加拨号命令 |
-|---|---|---|
-| **Quectel 移远** | **RG200U-CN、RM500U-CN/-EA/-CNV**（unisoc）；**RM500Q-CN/-AE/-GL、RM502Q-AE/-GL、RM505Q-AE、RM520N-CN/-GL**（qualcomm） | `AT+QNETDEVCTL=1,3,1`（部分固件为 `1,1,1`，需实测微调） |
-| **Meig 美格** | **SRM815、SRM825、SRM825N** | `AT^NDISDUP=1,1` |
-
-> 切模式示例（需实测确认）：Quectel `AT+QCFG="usbnet",1`(ECM)/`3`(RNDIS)；切模后 VID:PID/网卡名/AT 口全部自动重识别，项目其余部分**零改动**。
-
-### C 档 · 需较大改造（不建议，除非必须）
-
-- 上述 Qualcomm 机型**保持默认 QMI/MBIM 模式**：需要 `qmi_wwan/cdc_mbim` + `uqmi/umbim` 或 ModemManager 协议栈（本项目已主动移除 MM 且无 QMI 路径，属数十行 + 新依赖工程）；
-- **全部 8 个 PCIe/MHI 机型**（含 FM350-GL PCIE 版）：识别/复位/热插拔逻辑均基于 USB 树，不适用。
-
-### D 档 · 不兼容但安全
-
-非蜂窝 USB 设备：自动扫描凭 AT 应答白名单自然跳过，**不会误识别、不会误拨号**。
-
-## 2.4 若做多厂商兼容：最小改造接口（评估建议，未实施）
-
-1. UCI 增加 `profile.manufacturer`（`auto`/`fibocom`/`quectel`/`meig`；auto 按 ATI 应答判定）；
-2. 拨号触发**表驱动**：`fibocom→CGACT/GTRNDIS`、`quectel→QNETDEVCTL`、`meig→NDISDUP`（每厂商 1~2 行）；
-3. 厂商标识/信息文件按 `fibocom.sh` 范式并列 `quectel.sh`/`meig.sh`（DNS 与信号解析可直接参考 `baseline/` 同名脚本）；
-4. **通用底座零改动**：自动识别、分级恢复、IPv6 刷新、冻结检测、UI、打包、离线依赖。
-
-## 2.5 待实测项
-
-- Quectel `AT+QNETDEVCTL` 参数变体与目标固件兼容性；`AT+QCFG="usbnet",…` 在目标型号的实际支持；
-- Meig `AT^NDISDUP` 在 SRM8xx 的回显格式；
-- 各厂商 ECM 模式下 IPv6 PD 是否照常（本项目 dhcpv6 路径预期可直接复用）。
-
----
-
-# 第三部分 · 许可证
-
-本项目以 **GPL-3.0-only** 发布：全文见 [`LICENSE`](LICENSE)（包内另附一份 `luci-app-fm350/LICENSE`）。
-
-原因是 `luci-app-fm350/files/usr/lib/fm350/fibocom.sh` 的信号/小区换算公式与解析结构
-**抽取并修改自** [luci-app-modem](https://github.com/qianlyun123/luci-app-modem) v1.4.4
-（作者 Siriling，`PKG_LICENSE:=GPLv3`）；按 GPLv3 §5 修改版必须以 GPLv3 授权整个作品，
-并保留上游版权、标注已修改——该文件头部已带完整声明。**因此不能再标 MIT**。
-
-各上游组件（LuCI / rpcd / jq / sms-tool / 内核模块 / odhcp6c 等）的许可证与兼容性说明见
-[**docs/licenses.md**](docs/licenses.md)。仓库**不包含任何第三方二进制**，依赖由
-`dist/deps-*/download.sh` 从官方源（含镜像）下载并校验，自建包由 `build/` 下的脚本编译。
-
----
-
-*本 README 对应 luci-app-fm350 r36（GPL-3.0-only）；构建/安装/回滚细节见 `build/`、`deploy/`、
-`docs/` 与 `dist/deps-ipk|deps-apk/README.md`。*
