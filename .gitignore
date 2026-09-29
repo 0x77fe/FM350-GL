@@ -1,0 +1,46 @@
+# ── 非关键内容：参考代码 / 草稿 / 构建产物 / 本机环境 ──────────────────────
+#
+# 入库原则：**源码、构建与部署脚本、离线安装包与文档**入库；
+#          第三方参考件、草稿、可重建的散件产物、本机环境不入库。
+
+# 参考代码（第三方）：luci-app-modem 1.4.4 的机型库与厂商脚本快照、旧链路配置备份。
+# 只作对照阅读，不是本项目源码，且属他人作品（GPL），不入库。
+# README 里对它的说明保留文字引用，本地保留文件即可。
+/baseline/
+
+# 草稿 / 临时目录（会话中间产物、抓包、代码片段）
+/.tmp/
+
+# 抓依赖脚本的中间目录
+/dist/deps-apk/.fetch-tmp/
+
+# 仓库**不含任何二进制包**（含第三方 GPL 二进制与自建包）：
+# 离线包目录只保留 download.sh / install_all.sh / SHA256SUMS / README.md，
+# 于是 `sh download.sh` 从官方源拉包并校验，`sh install_all.sh` 在路由器上离线安装。
+# 自建包由 build/ 下的脚本产出，也不入库。
+/dist/deps-apk/*.apk
+/dist/deps-ipk/*.ipk
+/dist/*.apk
+/dist/*.ipk
+
+# 编辑器 / 操作系统噪声
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 日志与临时文件
+*.log
+*.bak
+*.orig
+*.rej
+
+# 本机环境文件（构建机地址、SDK 路径、令牌等一律走环境变量，不要提交）
+*.env
+*.env.*
+.env
+.env.*

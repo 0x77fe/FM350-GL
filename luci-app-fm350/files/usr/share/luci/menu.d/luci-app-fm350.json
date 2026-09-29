@@ -1,0 +1,62 @@
+{
+	"admin/services/fm350": {
+		"title": "FM350 管理",
+		"order": 60,
+		"action": {
+			"type": "alias",
+			"path": "admin/services/fm350/dash"
+		},
+		"depends": {
+			"acl": [ "luci-app-fm350" ],
+			"uci": { "fm350": true }
+		}
+	},
+	"admin/services/fm350/dash": {
+		"title": "状态总览",
+		"order": 5,
+		"action": {
+			"type": "view",
+			"path": "fm350/board"
+		}
+	},
+	"admin/services/fm350/detail": {
+		"title": "详情表",
+		"order": 10,
+		"action": {
+			"type": "view",
+			"path": "fm350/dataview"
+		}
+	},
+	"admin/services/fm350/at": {
+		"title": "AT 命令",
+		"order": 20,
+		"action": {
+			"type": "view",
+			"path": "fm350/atcon"
+		}
+	},
+	"admin/services/fm350/dialop": {
+		"title": "拨号管理",
+		"order": 30,
+		"action": {
+			"type": "view",
+			"path": "fm350/dialpan"
+		}
+	},
+	"admin/services/fm350/config": {
+		"title": "设置",
+		"order": 40,
+		"action": {
+			"type": "view",
+			"path": "fm350/config"
+		}
+	},
+	"admin/services/fm350/logview": {
+		"title": "日志",
+		"order": 50,
+		"action": {
+			"type": "view",
+			"path": "fm350/logpanel"
+		}
+	}
+}

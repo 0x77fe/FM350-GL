@@ -1,0 +1,33 @@
+{
+	"luci-app-fm350": {
+		"description": "Grant access to FM350-GL management",
+		"read": {
+			"ubus": {
+				"fm350": [
+					"status",
+					"cell",
+					"events",
+					"logs",
+					"config_get",
+					"probe"
+				]
+			},
+			"uci": [
+				"fm350"
+			]
+		},
+		"write": {
+			"ubus": {
+				"fm350": [
+					"at_exec",
+					"dial_op",
+					"config_set",
+					"events_clear"
+				]
+			},
+			"uci": [
+				"fm350"
+			]
+		}
+	}
+}
