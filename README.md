@@ -10,6 +10,7 @@ ImmortalWrt 24.10 / 25.12 上的 Fibocom FM350-GL 5G 模组管理器：**拨号�
 | 模组 | Fibocom FM350-GL，USB `0e8d:7127`（**VID:PID 亦自动识别**，无需预知） |
 | 数据面 | RNDIS → `eth2`（netifd 静态 v4 + dhcpv6/odhcp6c） |
 | 包名 | `luci-app-fm350`（当前 r36）；离线安装按体系分两份：`dist/deps-ipk/`（24.10 · opkg）、`dist/deps-apk/`（25.12+ · apk） |
+| 预编译包 | [Releases](https://github.com/0x77fe/FM350-GL/releases/latest)：`luci-app-fm350-1.0.0-r36.apk`（25.12+/apk）、`luci-app-fm350_1.0.0-r36_all.ipk`（24.10/opkg）；下载脚本会自动取回并校验，见 [1.10](#110-离线安装路由器不联网) |
 | 业务链路 | AT 口 `/dev/ttyUSB1`（自动探测）、APN ctnet、PDP ipv4v6、上下文 3 |
 
 ---
@@ -208,6 +209,8 @@ flowchart LR
 # 远程构建 · ipk（ImmortalWrt 24.10 / opkg：开发服务器 docker + ImmortalWrt SDK 24.10.6）
 # （另见 build/build-apk.sh：构建机 <build-host> 直跑 OpenWrt 25.12 官方 SDK 出 apk，无需 docker）
 sh build/build.sh                      # 产物 dist/luci-app-fm350_<ver>_all.ipk
+# 同一件事不用 docker 的做法（构建机是 Linux 即可）：直跑 ImmortalWrt 24.10.6 SDK
+sh build/build-ipk.sh                  # 产物 dist/luci-app-fm350_<ver>-r<rel>_all.ipk
 
 # 远程构建 · apk（OpenWrt 25.12+ / apk：构建机 <build-host> 直跑官方 SDK）
 sh build/build-apk.sh                  # 产物 dist/luci-app-fm350-<ver>-r<rel>.apk（PKGARCH=all）
@@ -215,12 +218,12 @@ sh build/build-apk.sh                  # 产物 dist/luci-app-fm350-<ver>-r<rel>
 # 刷新 apk 离线依赖包（换固件版本/ABI 后必做）：sh build/fetch-deps-apk.sh
 # 校验产物（假根安装 + 逐文件比对）：sh build/verify-apk.sh
 
-# 路由器安装 · 24.10/opkg（离线：先在联网的 Windows/Linux 机器上下依赖，见 1.10.1；Windows 原生方式亦见该节）
+# 路由器安装 · 24.10/opkg（离线：在联网的 Windows/Linux 机器上跑下面这条，依赖 + 预编译主包一次下齐，见 1.10.1）
 sh dist/deps-ipk/download.sh
 tar -czf - -C dist/deps-ipk . | ssh root@<router> "mkdir -p /tmp/deps-ipk && tar -xzf - -C /tmp/deps-ipk"
 ssh root@<router> "sh /tmp/deps-ipk/install_all.sh"
 
-# 路由器安装 · 25.12/apk（离线：同上，见 1.10.2）
+# 路由器安装 · 25.12/apk（离线：同上，依赖 + 预编译主包一次下齐，见 1.10.2）
 sh dist/deps-apk/download.sh
 tar -czf - -C dist/deps-apk . | ssh root@<router> "mkdir -p /tmp/deps-apk && tar -xzf - -C /tmp/deps-apk"
 ssh root@<router> "sh /tmp/deps-apk/install_all.sh"
@@ -245,9 +248,11 @@ ssh root@<router> "/etc/init.d/fm350mgr restart"
 ## 1.10 离线安装（路由器不联网）
 
 两套体系各一份离线安装目录，**互不通用**（内核 ABI 与包管理器都不同）。
-仓库**不含任何二进制**（含第三方 GPL 二进制与自建包）：依赖由 `download.sh`（Linux）或
+仓库**不含任何二进制**（含第三方 GPL 二进制与自建包）：第三方依赖由 `download.sh`（Linux）或
 `download.ps1`（Windows 原生 PowerShell，二者等价）在**联网的 Windows/Linux 机器**上按
-`SHA256SUMS` 现取并校验，自建包由 `build/` 下的脚本编译——所以仓库里只有脚本与清单。
+`SHA256SUMS` 从官方镜像现取并校验；**本项目自建的主包已发布到
+[Releases](https://github.com/0x77fe/FM350-GL/releases/latest)**，下载脚本按 `APP-SHA256SUMS`
+（文件名 + 发布时钉死的 sha256）一并取回并校验 —— 于是用户侧不需要编译，仓库里只有脚本与清单。
 
 | | `dist/deps-ipk/` | `dist/deps-apk/` |
 |---|---|---|
@@ -256,9 +261,10 @@ ssh root@<router> "/etc/init.d/fm350mgr restart"
 | 包管理器 | opkg（`.ipk`） | apk-tools 3（`.apk`） |
 | 依赖清单 | 17 个（`SHA256SUMS` 内） | 19 个（`SHA256SUMS` 内） |
 | 取依赖 | `sh download.sh`（Linux）｜`download.ps1`（Windows） | 同左 |
+| 取主包 | 下载脚本按 `APP-SHA256SUMS` 从 GitHub Release 取回预编译包；取不到可 `FM350_RELEASE_BASE` 换镜像或自行编译 | 同左 |
 | 装 | `install_all.sh`（`opkg install`） | `install_all.sh`（`apk add --network=no`） |
 
-两个安装脚本结构相同：**预检**（固件自带基础包 + 内核/ABI）→ **校验 `SHA256SUMS`** → 装依赖 →
+两个安装脚本结构相同：**预检**（固件自带基础包 + 内核/ABI）→ **校验 `SHA256SUMS` 与 `APP-SHA256SUMS`** → 装依赖 →
 装主包 → `rpcd restart` + uhttpd `no_cache=js` → 启守护并打印状态（含 ubus 对象是否注册）。
 预检不通过或校验失败会**明确报错并退出**，不会留下半装状态。
 
@@ -266,15 +272,17 @@ ssh root@<router> "/etc/init.d/fm350mgr restart"
 > Windows 用自带的 `tar`（bsdtar）+ `scp -O`——PowerShell 里的管道会把二进制当文本处理而损坏，所以先打成 `.tar.gz` 再传。
 > Windows 上的 **Git Bash** 跑 `download.sh` 若报 `curl: (35) schannel: CRYPT_E_REVOCATION_OFFLINE`，
 > 加 `FM350_CURL_OPTS=--ssl-no-revoke`，或直接用 `download.ps1`。
+> 主包来自 GitHub Release，国内可能慢或不可达：`FM350_RELEASE_BASE=<镜像/代理前缀>` 可换源；
+> 也可以完全不用 Release —— 在构建机上编译（`build/build-apk.sh` / `build/build-ipk.sh`）后把产物拷进对应目录。
 
 ### 1.10.1 ipk 离线安装（ImmortalWrt 24.10 及以前 · opkg）
 
 **Linux**（或 Windows 上的 Git Bash / WSL）：
 
 ```sh
-# 1) 联网的 Windows/Linux 机器：下依赖（约 7 秒）并编译主包放进本目录
+# 1) 联网的 Windows/Linux 机器：依赖（官方镜像，约 7 秒）+ 预编译主包（GitHub Release）一次下齐并校验
 sh dist/deps-ipk/download.sh
-sh build/build.sh && cp dist/luci-app-fm350_*.ipk dist/deps-ipk/
+#    想自己编主包：sh build/build-ipk.sh && cp dist/luci-app-fm350_*.ipk dist/deps-ipk/
 
 # 2) 送到路由器 → 离线安装
 tar -czf - -C dist/deps-ipk . | ssh root@<router> "mkdir -p /tmp/deps-ipk && tar -xzf - -C /tmp/deps-ipk"
@@ -284,7 +292,7 @@ ssh root@<router> "sh /tmp/deps-ipk/install_all.sh"
 **Windows 原生**（PowerShell，不需要 Git Bash / WSL；以下命令在仓库根目录执行）：
 
 ```powershell
-# 1) 下依赖并校验（等价于 sh download.sh）；主包仍需在构建机上编译后拷进本目录
+# 1) 依赖 + 预编译主包一次下齐并校验（等价于 sh download.sh）
 powershell -ExecutionPolicy Bypass -File dist\deps-ipk\download.ps1
 
 # 2) 打包送到路由器 → 离线安装
@@ -302,9 +310,9 @@ ssh root@<router> "sh /tmp/deps-ipk/install_all.sh"
 **Linux**（或 Windows 上的 Git Bash / WSL）：
 
 ```sh
-# 1) 联网的 Windows/Linux 机器：下依赖（约 7 秒）并编译主包放进本目录
+# 1) 联网的 Windows/Linux 机器：依赖（官方镜像，约 7 秒）+ 预编译主包（GitHub Release）一次下齐并校验
 sh dist/deps-apk/download.sh
-sh build/build-apk.sh && cp dist/luci-app-fm350-*.apk dist/deps-apk/
+#    想自己编主包：sh build/build-apk.sh && cp dist/luci-app-fm350-*.apk dist/deps-apk/
 
 # 2) 送到路由器 → 离线安装
 tar -czf - -C dist/deps-apk . | ssh root@<router> "mkdir -p /tmp/deps-apk && tar -xzf - -C /tmp/deps-apk"
@@ -314,7 +322,7 @@ ssh root@<router> "sh /tmp/deps-apk/install_all.sh"
 **Windows 原生**（PowerShell，不需要 Git Bash / WSL；以下命令在仓库根目录执行）：
 
 ```powershell
-# 1) 下依赖并校验（等价于 sh download.sh）；主包仍需在构建机上编译后拷进本目录
+# 1) 依赖 + 预编译主包一次下齐并校验（等价于 sh download.sh）
 powershell -ExecutionPolicy Bypass -File dist\deps-apk\download.ps1
 
 # 2) 打包送到路由器 → 离线安装
@@ -331,5 +339,6 @@ ssh root@<router> "sh /tmp/deps-apk/install_all.sh"
 > 换了固件版本（哪怕只是 25.12.1 → 25.12.2）都要**重新抓一套**：
 > `FM350_VER=… FM350_ABI=… sh build/fetch-deps-apk.sh`（apk 侧；它会重写 `SHA256SUMS`），
 > 主包由 `sh build/build-apk.sh` 产出。ipk 侧同理，kmod 必须与固件内核 ABI 完全一致。
+> 主包升级（换 r 号）：构建机出包 → 传到 Release → 更新对应 `dist/deps-*/APP-SHA256SUMS` 里的文件名与 sha256。
 
 ---

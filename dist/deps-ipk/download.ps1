@@ -9,7 +9,8 @@
   目标固件：ImmortalWrt 24.10.x x86_64（kernel 6.6.122，kmods ABI 6.6.122-1-e7e50fbc0aafa7443418a79928da2602）
 
   用法（在仓库根目录）：
-      powershell -ExecutionPolicy Bypass -File dist\deps-ipk\download.ps1     # 下载 + 校验 17 个依赖
+      powershell -ExecutionPolicy Bypass -File dist\deps-ipk\download.ps1     # 下载 + 校验 17 个依赖，并取回主包
+      # 生成的目录里会同时有：17 个第三方依赖（从官方镜像）+ 预编译主包（从本项目的 GitHub Release）
       # 打包送到路由器（Windows 自带 bsdtar 与 OpenSSH；PowerShell 里的 tar 管道会损坏二进制，所以先打包再传）：
       tar -czf "$env:TEMP\deps-ipk.tar.gz" -C dist\deps-ipk .
       scp -O "$env:TEMP\deps-ipk.tar.gz" root@<router>:/tmp/
@@ -20,19 +21,25 @@
       -Version  固件版本       $env:FM350_VER      默认 24.10.5（换版本要同时换一套 SHA256SUMS 与主包）
       -Abi      kmods ABI      $env:FM350_ABI      默认 6.6.122-1-e7e50fbc0aafa7443418a79928da2602
       -Mirrors  镜像列表       $env:FM350_MIRRORS  空格分隔，按顺序尝试，默认 NJU → USTC → PKU → 官方
+      -ReleaseBase 主包来源前缀 $env:FM350_RELEASE_BASE 默认本项目 Release 的 latest/download
+                   （GitHub 慢/不可达时换成镜像或代理前缀重跑）
+      设 $env:FM350_NO_APP=1 则跳过取主包（只要依赖时用）
 
   说明：
     · 仓库**不含二进制**：包名与 sha256 固定在 SHA256SUMS 里，本脚本按清单逐个下载并校验，
       只有校验通过才会留下文件（不会留下半成品或被篡改的包）；
     · kmod 与固件内核 ABI 强绑定，装错版本 opkg 会拒绝；odhcp6c / odhcpd-ipv6only 来自 base feed，
       其余（jq / sms-tool）来自 packages feed —— 下面按包名前缀分派下载路径；
-    · 本项目自身的包（luci-app-fm350_*.ipk）由 build/build.sh 编译产出，不在 SHA256SUMS 里。
+    · 本项目自身的包（luci-app-fm350_*.ipk）不在 SHA256SUMS 里：文件名与 sha256 固定在
+      APP-SHA256SUMS，本脚本据此从 GitHub Release（预编译产物）取回；也可自行编译后拷进来
+      （构建机：sh build/build-ipk.sh）。
 #>
 [CmdletBinding()]
 param(
-	[string]$Version = $env:FM350_VER,
-	[string]$Abi     = $env:FM350_ABI,
-	[string]$Mirrors = $env:FM350_MIRRORS
+	[string]$Version     = $env:FM350_VER,
+	[string]$Abi         = $env:FM350_ABI,
+	[string]$Mirrors     = $env:FM350_MIRRORS,
+	[string]$ReleaseBase = $env:FM350_RELEASE_BASE
 )
 
 $ErrorActionPreference = 'Stop'
@@ -43,6 +50,7 @@ if ([string]::IsNullOrEmpty($Abi))     { $Abi     = '6.6.122-1-e7e50fbc0aafa7443
 if ([string]::IsNullOrEmpty($Mirrors)) {
 	$Mirrors = 'https://mirror.nju.edu.cn/immortalwrt https://mirrors.ustc.edu.cn/immortalwrt https://mirrors.pku.edu.cn/immortalwrt https://downloads.immortalwrt.org'
 }
+if ([string]::IsNullOrEmpty($ReleaseBase)) { $ReleaseBase = 'https://github.com/0x77fe/FM350-GL/releases/latest/download' }
 
 # PS 5.1 默认可能没开 TLS 1.2（ImmortalWrt 的源只收 TLS 1.2+）；
 # 另外 Invoke-WebRequest 的进度条会让下载慢十倍以上，这里关掉
@@ -122,14 +130,47 @@ Write-Host ('== 依赖：成功 {0} 个，失败 {1} 个 ==' -f $ok, $fail)
 if ($fail -gt 0) { exit 1 }
 
 Write-Host ''
-$app = @(Get-ChildItem -Path (Join-Path $PSScriptRoot 'luci-app-fm350_*.ipk') -File -ErrorAction SilentlyContinue)
-if ($app.Count -gt 0) {
-	Write-Host '== 主包已在本目录 =='
-	foreach ($a in $app) { Write-Host ('  {0}  {1} 字节' -f $a.Name, $a.Length) }
+# ---- 主包：本目录已有就跳过；没有则按 APP-SHA256SUMS 从 GitHub Release 取回预编译产物 ----
+$appFile = @(Get-ChildItem -Path (Join-Path $PSScriptRoot 'luci-app-fm350_*.ipk') -File -ErrorAction SilentlyContinue) | Select-Object -First 1
+$appSums = Join-Path $PSScriptRoot 'APP-SHA256SUMS'
+
+if ($appFile) {
+	Write-Host ('== 主包已在本目录：{0}（{1} 字节）==' -f $appFile.Name, $appFile.Length)
+} elseif ($env:FM350_NO_APP) {
+	Write-Host '== 跳过主包（FM350_NO_APP 已设）=='
+} elseif (Test-Path -LiteralPath $appSums) {
+	$line = Get-Content -LiteralPath $appSums | Where-Object { $_ -match '\S' } | Select-Object -First 1
+	if ($line -match '^\s*([0-9a-fA-F]{64})\s+\*?(.+?)\s*$') {
+		$want = $Matches[1].ToLowerInvariant()
+		$name = $Matches[2] -replace '^\./', '' -replace '^\.\\', ''
+		$tmpName = "$name.new"
+		Write-Host ('== 主包不在本目录 → 从 Release 取：{0} ==' -f $name)
+		$ok2 = $false
+		try {
+			Invoke-WebRequest -Uri "$ReleaseBase/$name" -OutFile $tmpName -UseBasicParsing -TimeoutSec 600
+			if ((Test-Path -LiteralPath $tmpName) -and ((Get-Item -LiteralPath $tmpName).Length -gt 0) -and ((Get-Sha256 $tmpName) -eq $want)) {
+				Move-Item -LiteralPath $tmpName -Destination $name -Force
+				$ok2 = $true
+			}
+		} catch { }
+		if (Test-Path -LiteralPath $tmpName) { Remove-Item -LiteralPath $tmpName -Force -ErrorAction SilentlyContinue }
+		if ($ok2) {
+			Write-Host ('  已取回 {0}（sha256 与 APP-SHA256SUMS 一致）✓' -f $name)
+			$appFile = Get-Item -LiteralPath $name
+		} else {
+			Write-Host '  !! 取不到或校验失败：GitHub 在国内可能很慢或不可达'
+			Write-Host '     ① 换镜像/代理重跑：$env:FM350_RELEASE_BASE="<镜像前缀>"; .\download.ps1'
+			Write-Host '     ② 在构建机上自行编译后拷进来：sh build/build-ipk.sh && cp dist/luci-app-fm350_*.ipk dist\deps-ipk\'
+		}
+	}
 } else {
-	Write-Host '== 还缺主包 luci-app-fm350_*.ipk（仓库不含二进制）=='
-	Write-Host '   在装有 docker 的构建机上编译后，把 dist/luci-app-fm350_*.ipk 拷到本目录：'
-	Write-Host '     sh build/build.sh              # docker + ImmortalWrt SDK（出 ipk）'
+	Write-Host '== 缺少 APP-SHA256SUMS，无法确定主包文件名与 sha256 =='
+}
+
+if (-not $appFile) {
+	Write-Host ''
+	Write-Host '== 本目录还不完整（缺主包 luci-app-fm350_*.ipk）：按上面的提示补上后再传路由器 =='
+	exit 1
 }
 
 Write-Host ''

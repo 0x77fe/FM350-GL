@@ -2,7 +2,7 @@
 # luci-app-fm350 离线安装 —— apk 体系（OpenWrt / ImmortalWrt 25.12 及以后）
 #
 # 目标：ImmortalWrt 25.12.x x86/64（kernel 6.12.94，kmods ABI 6.12.94-1-0413601b1c3f0490e17f340fe09229ea）
-# 前置：在**联网的 Windows/Linux 机器**上先跑下载脚本把依赖下齐并校验
+# 前置：在**联网的 Windows/Linux 机器**上先跑下载脚本把依赖与预编译主包都下齐并校验
 #       （Linux：`sh download.sh`；Windows 原生：`download.ps1`，二者等价），
 #       再把整个目录传到路由器执行本脚本 —— 路由器**不需要联网**
 #     # Linux
@@ -16,8 +16,10 @@
 #     # 两边一样：在路由器上离线安装
 #     ssh root@<router> "sh /tmp/deps-apk/install_all.sh"
 #
-# 目录内容：download.sh / download.ps1（联网下载，二选一）+ 19 个依赖包 + SHA256SUMS + 主包 luci-app-fm350-*.apk（自建）
-#   · 仓库不含二进制，依赖由下载脚本按 SHA256SUMS 从官方源取得并校验；
+# 目录内容：download.sh / download.ps1（联网下载，二选一）+ 19 个依赖包 + SHA256SUMS
+#           + 主包 luci-app-fm350-*.apk + APP-SHA256SUMS（主包的发布锚点）
+#   · 仓库不含二进制：第三方依赖由下载脚本按 SHA256SUMS 从官方镜像取得并校验，
+#     主包（本项目自建）由下载脚本按 APP-SHA256SUMS 从 GitHub Release 取回并校验；
 #   · kmod 与固件内核 ABI 强绑定，装错版本 apk 会直接拒绝（所以脚本先预检 ABI）；
 #   · 所有 apk add 都带 --network=no：只用本目录 + 固件已装的包，不访问网络。
 set -e
@@ -64,11 +66,22 @@ else
 	echo "  (无 SHA256SUMS，跳过)"
 fi
 
+# 主包清单（APP-SHA256SUMS）：按发布时钉死的 sha256 校验主包 —— 防传输截断 / 被替换
+if [ -f APP-SHA256SUMS ]; then
+	sha256sum -c APP-SHA256SUMS >/dev/null 2>&1 && echo "  主包校验通过 ✓" || {
+		echo "  !! 主包（luci-app-fm350-*.apk）缺失或内容不符：回联网的 Windows/Linux 机器跑本目录的下载脚本"
+		echo "     （download.sh / download.ps1 会从 GitHub Release 取回预编译主包），再重新传过来；"
+		echo "     或在构建机上编译后拷进来：sh build/build-apk.sh"
+		sha256sum -c APP-SHA256SUMS 2>&1 | grep -v OK
+		exit 1
+	}
+fi
+
 echo "[2/6] 安装内核模块与工具（本地文件，禁网）"
 apk add --network=no --allow-untrusted ./kmod-*.apk ./jq-*.apk ./sms-tool-*.apk
 
 APP=$(ls ./luci-app-fm350-*.apk 2>/dev/null | head -1)
-[ -n "$APP" ] || { echo "缺少 luci-app-fm350 apk"; exit 1; }
+[ -n "$APP" ] || { echo "缺少 luci-app-fm350 apk：回联网的 Windows/Linux 机器跑本目录的下载脚本（会从 GitHub Release 取回），或自行编译后拷进来"; exit 1; }
 echo "[3/6] 安装主包 $APP"
 apk add --network=no --allow-untrusted "$APP"
 

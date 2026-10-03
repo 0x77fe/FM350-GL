@@ -2,7 +2,7 @@
 # luci-app-fm350 离线安装 —— ipk 体系（ImmortalWrt / OpenWrt 24.10 及以前，opkg）
 #
 # 目标：ImmortalWrt 24.10.x x86_64（kernel 6.6.122，kmods ABI 6.6.122-1-e7e50fbc0aafa7443418a79928da2602）
-# 前置：在**联网的 Windows/Linux 机器**上先跑下载脚本把依赖下齐并校验
+# 前置：在**联网的 Windows/Linux 机器**上先跑下载脚本把依赖与预编译主包都下齐并校验
 #       （Linux：`sh download.sh`；Windows 原生：`download.ps1`，二者等价），
 #       再把整个目录传到路由器执行本脚本 —— 路由器**不需要联网**
 #     # Linux
@@ -16,8 +16,10 @@
 #     # 两边一样：在路由器上离线安装
 #     ssh root@<router> "sh /tmp/deps-ipk/install_all.sh"
 #
-# 目录内容：download.sh / download.ps1（联网下载，二选一）+ 17 个依赖包 + SHA256SUMS + 主包 luci-app-fm350_*.ipk（自建）
-#   · 仓库不含二进制，依赖由下载脚本按 SHA256SUMS 从官方源取得并校验
+# 目录内容：download.sh / download.ps1（联网下载，二选一）+ 17 个依赖包 + SHA256SUMS
+#           + 主包 luci-app-fm350_*.ipk + APP-SHA256SUMS（主包的发布锚点）
+#   · 仓库不含二进制：第三方依赖由下载脚本按 SHA256SUMS 从官方镜像取得并校验，
+#     主包（本项目自建）由下载脚本按 APP-SHA256SUMS 从 GitHub Release 取回并校验
 set -e
 
 DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -64,6 +66,17 @@ else
 	echo "  (无 SHA256SUMS，跳过)"
 fi
 
+# 主包清单（APP-SHA256SUMS）：按发布时钉死的 sha256 校验主包 —— 防传输截断 / 被替换
+if [ -f APP-SHA256SUMS ]; then
+	sha256sum -c APP-SHA256SUMS >/dev/null 2>&1 && echo "  主包校验通过 ✓" || {
+		echo "  !! 主包（luci-app-fm350_*.ipk）缺失或内容不符：回联网的 Windows/Linux 机器跑本目录的下载脚本"
+		echo "     （download.sh / download.ps1 会从 GitHub Release 取回预编译主包），再重新传过来；"
+		echo "     或在构建机上编译后拷进来：sh build/build-ipk.sh"
+		sha256sum -c APP-SHA256SUMS 2>&1 | grep -v OK
+		exit 1
+	}
+fi
+
 echo "[2/6] 安装依赖包（kmod / sms-tool / jq / odhcp6c / odhcpd-ipv6only）"
 opkg install ./kmod-usb-core_*.ipk ./kmod-usb2_*.ipk ./kmod-usb3_*.ipk \
 	./kmod-usb-ehci_*.ipk ./kmod-usb-ohci_*.ipk ./kmod-usb-xhci-hcd_*.ipk \
@@ -72,7 +85,7 @@ opkg install ./kmod-usb-core_*.ipk ./kmod-usb2_*.ipk ./kmod-usb3_*.ipk \
 	./kmod-usb-wdm_*.ipk ./sms-tool_*.ipk ./jq_*.ipk ./odhcp6c_*.ipk ./odhcpd-ipv6only_*.ipk 2>&1 | tail -5
 
 APP=$(ls ./luci-app-fm350_*.ipk 2>/dev/null | head -1)
-[ -n "$APP" ] || { echo "缺少 luci-app-fm350 ipk"; exit 1; }
+[ -n "$APP" ] || { echo "缺少 luci-app-fm350 ipk：回联网的 Windows/Linux 机器跑本目录的下载脚本（会从 GitHub Release 取回），或自行编译后拷进来"; exit 1; }
 echo "[3/6] 安装 $APP"
 opkg install "$APP" 2>&1 | tail -4
 

@@ -10,14 +10,16 @@ kmods ABI 目录：`6.6.122-1-e7e50fbc0aafa7443418a79928da2602`
 
 | 文件 | 作用 |
 |---|---|
-| `download.sh` | 在**联网的 Windows/Linux 机器**上按 `SHA256SUMS` 从官方源（含镜像）下载 17 个依赖并逐一校验（Linux / macOS / Git Bash / WSL） |
+| `download.sh` | 在**联网的 Windows/Linux 机器**上按 `SHA256SUMS` 从官方源（含镜像）下载 17 个依赖并逐一校验，再按 `APP-SHA256SUMS` 从 GitHub Release 取回预编译主包（Linux / macOS / Git Bash / WSL） |
 | `download.ps1` | 同上，Windows 原生 PowerShell 实现（Windows 10+ 自带 PowerShell 与 bsdtar，**不需要 Git Bash / WSL**） |
-| `install_all.sh` | 在**路由器**上离线安装（`opkg install`），自带内核版本预检与校验 |
+| `install_all.sh` | 在**路由器**上离线安装（`opkg install`），自带内核版本预检与双重校验（`SHA256SUMS` + `APP-SHA256SUMS`） |
 | `SHA256SUMS` | 17 个第三方依赖的确切文件名与 sha256（本项目的包不在其中） |
+| `APP-SHA256SUMS` | **主包** `luci-app-fm350_*.ipk` 的文件名与 sha256（发布锚点，下载脚本据此从 Release 取回） |
 | `README.md` | 本文件 |
 
-第三方二进制（GPL-2.0 的内核模块与 odhcp6c/odhcpd-ipv6only 等）**不入库**，由 `download.sh`（Linux）或 `download.ps1`（Windows）取得；
-本项目自己的包 `luci-app-fm350_*.ipk` 由 `build/build.sh` 编译产出后放进本目录。
+第三方二进制（GPL-2.0 的内核模块与 odhcp6c/odhcpd-ipv6only 等）**不入库**，由 `download.sh`（Linux）或 `download.ps1`（Windows）从官方镜像取得；
+本项目自己的包 `luci-app-fm350_*.ipk` 同样不入库，由下载脚本按 `APP-SHA256SUMS` 从 GitHub Release 取回
+（也可在构建机上 `sh build/build-ipk.sh`——直跑 ImmortalWrt 24.10.6 SDK，无需 docker——编译后拷进本目录）。
 
 ## 依赖清单
 
@@ -39,10 +41,9 @@ kmods ABI 目录：`6.6.122-1-e7e50fbc0aafa7443418a79928da2602`
 **方式一 · Linux / macOS（或 Windows 上的 Git Bash / WSL）**（命令在仓库根目录执行）
 
 ```sh
-# 1) 联网的 Windows/Linux 机器：下依赖并校验（7 秒左右，NJU 镜像）
+# 1) 联网的 Windows/Linux 机器：依赖（官方镜像，7 秒左右）+ 预编译主包（GitHub Release）一次下齐并校验
 sh dist/deps-ipk/download.sh
-#    再把主包编译好放进本目录（仓库不含二进制）：
-#    sh build/build.sh && cp dist/luci-app-fm350_*.ipk dist/deps-ipk/
+#    想自己编主包：sh build/build-ipk.sh && cp dist/luci-app-fm350_*.ipk dist/deps-ipk/
 
 # 2) 送到路由器，离线安装（dropbear 无 sftp-server，OpenSSH 9+ 默认走 SFTP 会直接失败 → 用 tar 管道最稳；
 #    若用 scp 则必须带 -O 走旧的 SCP 协议）
@@ -57,8 +58,8 @@ ssh root@<router> "sh /tmp/deps-ipk/install_all.sh"
 **方式二 · Windows 原生（PowerShell，不需要 Git Bash / WSL）**
 
 ```powershell
-# 1) 下依赖并校验（与 download.sh 等价：同一份 SHA256SUMS、同一套镜像回落顺序）
-#    -ExecutionPolicy Bypass 是为了免去改执行策略；主包仍需在构建机上编译后拷进本目录
+# 1) 依赖 + 预编译主包一次下齐并校验（与 download.sh 等价：同一份 SHA256SUMS / APP-SHA256SUMS、同一套镜像回落顺序）
+#    -ExecutionPolicy Bypass 是为了免去改执行策略
 powershell -ExecutionPolicy Bypass -File dist\deps-ipk\download.ps1
 
 # 2) 送到路由器再离线安装（以下命令在仓库根目录执行）
@@ -71,10 +72,25 @@ ssh root@<router> "mkdir -p /tmp/deps-ipk && tar -xzf /tmp/deps-ipk.tar.gz -C /t
 ssh root@<router> "sh /tmp/deps-ipk/install_all.sh"
 ```
 
-> `download.ps1` 支持与 `download.sh` 相同的三个开关（命令行参数优先于环境变量）：
-> `-Version`（`FM350_VER`）、`-Abi`（`FM350_ABI`）、`-Mirrors`（`FM350_MIRRORS`）。
+> `download.ps1` 支持与 `download.sh` 相同的开关（命令行参数优先于环境变量）：
+> `-Version`（`FM350_VER`）、`-Abi`（`FM350_ABI`）、`-Mirrors`（`FM350_MIRRORS`）、
+> `-ReleaseBase`（`FM350_RELEASE_BASE`，主包来源前缀）。
 
-`install_all.sh` 做 6 步：预检固件自带依赖与内核版本 → 校验 `SHA256SUMS` → 装依赖包 → 装主包 →
+## 主包从哪来（GitHub Release）
+
+本目录**不放二进制**。自建主包发布在 [GitHub Releases](https://github.com/0x77fe/FM350-GL/releases/latest)，
+文件名与 sha256 钉在 `APP-SHA256SUMS`；下载脚本跑完依赖后会据此取回并校验（取不到会明确报错并非 0 退出）。
+国内访问 GitHub 慢或不可达时：
+
+```sh
+FM350_RELEASE_BASE=https://<镜像或代理前缀> sh dist/deps-ipk/download.sh
+# 或完全绕开 Release：在构建机上编好再拷进来（build-ipk.sh 直跑 ImmortalWrt 24.10.6 SDK，不需要 docker）
+sh build/build-ipk.sh && cp dist/luci-app-fm350_*.ipk dist/deps-ipk/
+```
+
+主包升级（换 r 号或改依赖）时，Release 传新包并同步更新 `APP-SHA256SUMS` 的文件名与 sha256。
+
+`install_all.sh` 做 6 步：预检固件自带依赖与内核版本 → 校验 `SHA256SUMS` 与 `APP-SHA256SUMS` → 装依赖包 → 装主包 →
 `rpcd restart` + uhttpd `no_cache=js` → 启守护并打印状态（含 ubus 对象是否注册）。
 
 ## 镜像选择
