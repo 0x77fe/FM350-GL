@@ -215,7 +215,7 @@ sh build/build-apk.sh                  # 产物 dist/luci-app-fm350-<ver>-r<rel>
 # 刷新 apk 离线依赖包（换固件版本/ABI 后必做）：sh build/fetch-deps-apk.sh
 # 校验产物（假根安装 + 逐文件比对）：sh build/verify-apk.sh
 
-# 路由器安装 · 24.10/opkg（离线：先在联网机器上下依赖，见 1.10.1）
+# 路由器安装 · 24.10/opkg（离线：先在联网的 Windows/Linux 机器上下依赖，见 1.10.1；Windows 原生方式亦见该节）
 sh dist/deps-ipk/download.sh
 tar -czf - -C dist/deps-ipk . | ssh root@<router> "mkdir -p /tmp/deps-ipk && tar -xzf - -C /tmp/deps-ipk"
 ssh root@<router> "sh /tmp/deps-ipk/install_all.sh"
@@ -245,7 +245,8 @@ ssh root@<router> "/etc/init.d/fm350mgr restart"
 ## 1.10 离线安装（路由器不联网）
 
 两套体系各一份离线安装目录，**互不通用**（内核 ABI 与包管理器都不同）。
-仓库**不含任何二进制**（含第三方 GPL 二进制与自建包）：依赖由 `download.sh` 在联网机器上按
+仓库**不含任何二进制**（含第三方 GPL 二进制与自建包）：依赖由 `download.sh`（Linux）或
+`download.ps1`（Windows 原生 PowerShell，二者等价）在**联网的 Windows/Linux 机器**上按
 `SHA256SUMS` 现取并校验，自建包由 `build/` 下的脚本编译——所以仓库里只有脚本与清单。
 
 | | `dist/deps-ipk/` | `dist/deps-apk/` |
@@ -254,20 +255,24 @@ ssh root@<router> "/etc/init.d/fm350mgr restart"
 | 内核 / kmods ABI | 6.6.122 / `6.6.122-1-e7e50fbc…` | 6.12.94 / `6.12.94-1-0413601b…` |
 | 包管理器 | opkg（`.ipk`） | apk-tools 3（`.apk`） |
 | 依赖清单 | 17 个（`SHA256SUMS` 内） | 19 个（`SHA256SUMS` 内） |
-| 取依赖 | `sh download.sh`（联网机器） | `sh download.sh`（联网机器） |
+| 取依赖 | `sh download.sh`（Linux）｜`download.ps1`（Windows） | 同左 |
 | 装 | `install_all.sh`（`opkg install`） | `install_all.sh`（`apk add --network=no`） |
-| 许可证 | 见 [docs/licenses.md](docs/licenses.md) | 同左 |
 
 两个安装脚本结构相同：**预检**（固件自带基础包 + 内核/ABI）→ **校验 `SHA256SUMS`** → 装依赖 →
 装主包 → `rpcd restart` + uhttpd `no_cache=js` → 启守护并打印状态（含 ubus 对象是否注册）。
 预检不通过或校验失败会**明确报错并退出**，不会留下半装状态。
 
-> 传输用 `tar` 管道而不是 `scp`：OpenWrt 的 dropbear 不带 sftp-server，新版本 OpenSSH 客户端走 SFTP 协议会直接失败。
+> 传输：Linux 用 `tar` 管道（OpenWrt 的 dropbear 不带 sftp-server，新版本 OpenSSH 客户端走 SFTP 协议会直接失败）；
+> Windows 用自带的 `tar`（bsdtar）+ `scp -O`——PowerShell 里的管道会把二进制当文本处理而损坏，所以先打成 `.tar.gz` 再传。
+> Windows 上的 **Git Bash** 跑 `download.sh` 若报 `curl: (35) schannel: CRYPT_E_REVOCATION_OFFLINE`，
+> 加 `FM350_CURL_OPTS=--ssl-no-revoke`，或直接用 `download.ps1`。
 
 ### 1.10.1 ipk 离线安装（ImmortalWrt 24.10 及以前 · opkg）
 
+**Linux**（或 Windows 上的 Git Bash / WSL）：
+
 ```sh
-# 1) 联网机器：下依赖（约 7 秒）并编译主包放进本目录
+# 1) 联网的 Windows/Linux 机器：下依赖（约 7 秒）并编译主包放进本目录
 sh dist/deps-ipk/download.sh
 sh build/build.sh && cp dist/luci-app-fm350_*.ipk dist/deps-ipk/
 
@@ -276,18 +281,46 @@ tar -czf - -C dist/deps-ipk . | ssh root@<router> "mkdir -p /tmp/deps-ipk && tar
 ssh root@<router> "sh /tmp/deps-ipk/install_all.sh"
 ```
 
+**Windows 原生**（PowerShell，不需要 Git Bash / WSL；以下命令在仓库根目录执行）：
+
+```powershell
+# 1) 下依赖并校验（等价于 sh download.sh）；主包仍需在构建机上编译后拷进本目录
+powershell -ExecutionPolicy Bypass -File dist\deps-ipk\download.ps1
+
+# 2) 打包送到路由器 → 离线安装
+tar -czf "$env:TEMP\deps-ipk.tar.gz" -C dist\deps-ipk .
+scp -O "$env:TEMP\deps-ipk.tar.gz" root@<router>:/tmp/
+ssh root@<router> "mkdir -p /tmp/deps-ipk && tar -xzf /tmp/deps-ipk.tar.gz -C /tmp/deps-ipk"
+ssh root@<router> "sh /tmp/deps-ipk/install_all.sh"
+```
+
 装：`kmod-usb-{core,2,3,ehci,ohci,xhci-hcd,net,net-cdc-ether,net-rndis,serial,serial-wwan,acm,wdm}`、
 `jq`、`sms-tool`、`odhcp6c`、`odhcpd-ipv6only` + 自建的 `luci-app-fm350_*.ipk`。
 
 ### 1.10.2 apk 离线安装（OpenWrt / ImmortalWrt 25.12 及以后）
 
+**Linux**（或 Windows 上的 Git Bash / WSL）：
+
 ```sh
-# 1) 联网机器：下依赖（约 7 秒）并编译主包放进本目录
+# 1) 联网的 Windows/Linux 机器：下依赖（约 7 秒）并编译主包放进本目录
 sh dist/deps-apk/download.sh
 sh build/build-apk.sh && cp dist/luci-app-fm350-*.apk dist/deps-apk/
 
 # 2) 送到路由器 → 离线安装
 tar -czf - -C dist/deps-apk . | ssh root@<router> "mkdir -p /tmp/deps-apk && tar -xzf - -C /tmp/deps-apk"
+ssh root@<router> "sh /tmp/deps-apk/install_all.sh"
+```
+
+**Windows 原生**（PowerShell，不需要 Git Bash / WSL；以下命令在仓库根目录执行）：
+
+```powershell
+# 1) 下依赖并校验（等价于 sh download.sh）；主包仍需在构建机上编译后拷进本目录
+powershell -ExecutionPolicy Bypass -File dist\deps-apk\download.ps1
+
+# 2) 打包送到路由器 → 离线安装
+tar -czf "$env:TEMP\deps-apk.tar.gz" -C dist\deps-apk .
+scp -O "$env:TEMP\deps-apk.tar.gz" root@<router>:/tmp/
+ssh root@<router> "mkdir -p /tmp/deps-apk && tar -xzf /tmp/deps-apk.tar.gz -C /tmp/deps-apk"
 ssh root@<router> "sh /tmp/deps-apk/install_all.sh"
 ```
 

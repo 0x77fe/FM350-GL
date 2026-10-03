@@ -10,8 +10,15 @@
 #   3. 不再有 luci-app-modem / ModemManager 拆迁动作 —— 那是 24.10 老链路的遗留，
 #      25.12 全新固件里没有这些东西。
 #
-# 路由器不联网时用离线包（kmod/jq/sms-tool 全在包里，apk 走 --network=no）：
+# 路由器不联网时用离线包（kmod/jq/sms-tool 全在包里，apk 走 --network=no）。
+# 传输命令在联网的 Windows/Linux 机器上执行（先跑 dist/deps-apk 的 download.sh 或 download.ps1 把依赖下齐）：
+#     # Linux
 #     tar -czf - -C dist/deps-apk . | ssh root@<router> "mkdir -p /tmp/deps-apk && tar -xzf - -C /tmp/deps-apk"
+#     # Windows 原生（PowerShell 里的 tar 管道会损坏二进制 → 先打包再传；scp -O 适配 dropbear 无 sftp-server）
+#     tar -czf "$env:TEMP\deps-apk.tar.gz" -C dist/deps-apk .
+#     scp -O "$env:TEMP\deps-apk.tar.gz" root@<router>:/tmp/
+#     ssh root@<router> "mkdir -p /tmp/deps-apk && tar -xzf /tmp/deps-apk.tar.gz -C /tmp/deps-apk"
+#     # 两边一样
 #     ssh root@<router> "sh /tmp/deps-apk/install_all.sh"
 set -e
 

@@ -1,16 +1,30 @@
 #!/bin/sh
-# 下载离线依赖包（apk 体系）到本目录并逐一校验 —— 在**联网的开发机**上执行
+# 下载离线依赖包（apk 体系）到本目录并逐一校验 —— 在**联网的 Windows/Linux 机器**上执行
 #
 # 目标固件：ImmortalWrt 25.12.x x86/64（kernel 6.12.94，kmods ABI 6.12.94-1-0413601b1c3f0490e17f340fe09229ea）
-# 用法：
-#     sh download.sh                     # 下载 + 校验 19 个依赖
-#     tar czf - . | ssh root@<路由器> "mkdir -p /tmp/deps-apk && tar xzf - -C /tmp/deps-apk"
+# 用法（Linux / macOS，或 Windows 上的 Git Bash / WSL；以下命令在仓库根目录执行）：
+#     sh dist/deps-apk/download.sh        # 下载 + 校验 19 个依赖
+#     tar -czf - -C dist/deps-apk . | ssh root@<路由器> "mkdir -p /tmp/deps-apk && tar -xzf - -C /tmp/deps-apk"
+#     ssh root@<路由器> "sh /tmp/deps-apk/install_all.sh"
+#
+# Windows 原生用法（不需要 Git Bash / WSL）：跑同目录等价的 download.ps1
+#     powershell -ExecutionPolicy Bypass -File dist\deps-apk\download.ps1      # 在仓库根目录执行
+#     # 传输：PowerShell 里的 tar 管道会损坏二进制 → 先打包再传（Windows 自带 bsdtar 与 OpenSSH；
+#     #       scp 必须 -O：dropbear 没有 sftp-server，OpenSSH 9+ 默认的 SFTP 协议会直接失败）
+#     tar -czf "$env:TEMP\deps-apk.tar.gz" -C dist\deps-apk .
+#     scp -O "$env:TEMP\deps-apk.tar.gz" root@<路由器>:/tmp/
+#     ssh root@<路由器> "mkdir -p /tmp/deps-apk && tar -xzf /tmp/deps-apk.tar.gz -C /tmp/deps-apk"
 #     ssh root@<路由器> "sh /tmp/deps-apk/install_all.sh"
 #
 # 环境变量：
 #   FM350_VER      固件版本      默认 25.12.1（换版本要同时换一套 SHA256SUMS 与主包）
 #   FM350_ABI      kmods ABI     默认 6.12.94-1-0413601b1c3f0490e17f340fe09229ea
 #   FM350_MIRRORS  镜像列表（按顺序尝试），默认 NJU → USTC → PKU → 官方
+#   FM350_CURL_OPTS 额外传给 curl 的参数（默认空）。Windows 上的 Git Bash 若报
+#                   `curl: (35) schannel: CRYPT_E_REVOCATION_OFFLINE`（Git 自带 curl 走 Schannel，
+#                   联网校验证书吊销列表失败），加 --ssl-no-revoke 即可：
+#                       FM350_CURL_OPTS=--ssl-no-revoke sh download.sh
+#                   （或者直接用同目录的 download.ps1，它不受这个问题影响）
 #
 # 说明：
 #   · 仓库**不含二进制**：包名与 sha256 固定在 SHA256SUMS 里，本脚本按清单逐个下载并校验，
@@ -26,6 +40,7 @@ cd "$DIR"
 VER="${FM350_VER:-25.12.1}"
 ABI="${FM350_ABI:-6.12.94-1-0413601b1c3f0490e17f340fe09229ea}"
 MIRRORS="${FM350_MIRRORS:-https://mirror.nju.edu.cn/immortalwrt https://mirrors.ustc.edu.cn/immortalwrt https://mirrors.pku.edu.cn/immortalwrt https://downloads.immortalwrt.org}"
+CURL_OPTS="${FM350_CURL_OPTS:-}"
 
 [ -f SHA256SUMS ] || { echo "缺少 SHA256SUMS（依赖清单），无法确定要下什么"; exit 1; }
 command -v curl >/dev/null 2>&1 || { echo "需要 curl"; exit 1; }
@@ -48,7 +63,7 @@ while read -r want file; do
 
 	got=""
 	for m in $MIRRORS; do
-		if curl -fsSL --max-time 300 -o "$f.new" "$m/releases/$VER/$rel" 2>/dev/null \
+		if curl -fsSL $CURL_OPTS --max-time 300 -o "$f.new" "$m/releases/$VER/$rel" 2>/dev/null \
 			&& [ -s "$f.new" ] && [ "$(sha "$f.new")" = "$want" ]; then
 			mv -f "$f.new" "$f"; got="$m"; break
 		fi
@@ -75,4 +90,9 @@ else
 	echo "     sh build/build-apk.sh          # 默认 ImmortalWrt SDK 25.12.1"
 fi
 echo
-echo "== 下一步：整个目录传到路由器，再跑 install_all.sh =="
+echo "== 下一步：整个目录传到路由器，再跑 install_all.sh （以下命令在仓库根目录执行）=="
+echo "   Linux   ：tar -czf - -C dist/deps-apk . | ssh root@<router> \"mkdir -p /tmp/deps-apk && tar -xzf - -C /tmp/deps-apk\""
+echo '   Windows ：tar -czf "$env:TEMP\deps-apk.tar.gz" -C dist/deps-apk .'
+echo '             scp -O "$env:TEMP\deps-apk.tar.gz" root@<router>:/tmp/'
+echo '             ssh root@<router> "mkdir -p /tmp/deps-apk && tar -xzf /tmp/deps-apk.tar.gz -C /tmp/deps-apk"'
+echo '             ssh root@<router> "sh /tmp/deps-apk/install_all.sh"'

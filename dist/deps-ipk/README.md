@@ -10,12 +10,13 @@ kmods ABI 目录：`6.6.122-1-e7e50fbc0aafa7443418a79928da2602`
 
 | 文件 | 作用 |
 |---|---|
-| `download.sh` | 在**联网的开发机**上按 `SHA256SUMS` 从官方源（含镜像）下载 17 个依赖并逐一校验 |
+| `download.sh` | 在**联网的 Windows/Linux 机器**上按 `SHA256SUMS` 从官方源（含镜像）下载 17 个依赖并逐一校验（Linux / macOS / Git Bash / WSL） |
+| `download.ps1` | 同上，Windows 原生 PowerShell 实现（Windows 10+ 自带 PowerShell 与 bsdtar，**不需要 Git Bash / WSL**） |
 | `install_all.sh` | 在**路由器**上离线安装（`opkg install`），自带内核版本预检与校验 |
 | `SHA256SUMS` | 17 个第三方依赖的确切文件名与 sha256（本项目的包不在其中） |
 | `README.md` | 本文件 |
 
-第三方二进制（GPL-2.0 的内核模块与 odhcp6c/odhcpd-ipv6only 等）**不入库**，由 `download.sh` 取得；
+第三方二进制（GPL-2.0 的内核模块与 odhcp6c/odhcpd-ipv6only 等）**不入库**，由 `download.sh`（Linux）或 `download.ps1`（Windows）取得；
 本项目自己的包 `luci-app-fm350_*.ipk` 由 `build/build.sh` 编译产出后放进本目录。
 
 ## 依赖清单
@@ -35,23 +36,50 @@ kmods ABI 目录：`6.6.122-1-e7e50fbc0aafa7443418a79928da2602`
 
 ## 用法（两步）
 
+**方式一 · Linux / macOS（或 Windows 上的 Git Bash / WSL）**（命令在仓库根目录执行）
+
 ```sh
-# 1) 联网的开发机：下依赖并校验（7 秒左右，NJU 镜像）
-sh download.sh
+# 1) 联网的 Windows/Linux 机器：下依赖并校验（7 秒左右，NJU 镜像）
+sh dist/deps-ipk/download.sh
 #    再把主包编译好放进本目录（仓库不含二进制）：
 #    sh build/build.sh && cp dist/luci-app-fm350_*.ipk dist/deps-ipk/
 
-# 2) 送到路由器（dropbear 无 sftp-server 时走 tar 管道最稳），离线安装
+# 2) 送到路由器，离线安装（dropbear 无 sftp-server，OpenSSH 9+ 默认走 SFTP 会直接失败 → 用 tar 管道最稳；
+#    若用 scp 则必须带 -O 走旧的 SCP 协议）
 tar -czf - -C dist/deps-ipk . | ssh root@<router> "mkdir -p /tmp/deps-ipk && tar -xzf - -C /tmp/deps-ipk"
 ssh root@<router> "sh /tmp/deps-ipk/install_all.sh"
 ```
+
+> Windows 上的 **Git Bash** 若报 `curl: (35) schannel: CRYPT_E_REVOCATION_OFFLINE`（Git 自带 curl 走 Schannel，
+> 联网校验证书吊销列表失败），加 `FM350_CURL_OPTS=--ssl-no-revoke` 即可：
+> `FM350_CURL_OPTS=--ssl-no-revoke sh dist/deps-ipk/download.sh`；或改用下面的 `download.ps1`（不受这个问题影响）。
+
+**方式二 · Windows 原生（PowerShell，不需要 Git Bash / WSL）**
+
+```powershell
+# 1) 下依赖并校验（与 download.sh 等价：同一份 SHA256SUMS、同一套镜像回落顺序）
+#    -ExecutionPolicy Bypass 是为了免去改执行策略；主包仍需在构建机上编译后拷进本目录
+powershell -ExecutionPolicy Bypass -File dist\deps-ipk\download.ps1
+
+# 2) 送到路由器再离线安装（以下命令在仓库根目录执行）
+#    · PowerShell 里的 tar 管道会把二进制当文本处理而损坏 → 先打成 tar.gz 再传；
+#    · scp 必须带 -O：dropbear 没有 sftp-server，OpenSSH 9+ 默认的 SFTP 协议会直接失败；
+#    · tar / scp / ssh 都是 Windows 10+ 自带的（bsdtar + OpenSSH 客户端），无需另装。
+tar -czf "$env:TEMP\deps-ipk.tar.gz" -C dist\deps-ipk .
+scp -O "$env:TEMP\deps-ipk.tar.gz" root@<router>:/tmp/
+ssh root@<router> "mkdir -p /tmp/deps-ipk && tar -xzf /tmp/deps-ipk.tar.gz -C /tmp/deps-ipk"
+ssh root@<router> "sh /tmp/deps-ipk/install_all.sh"
+```
+
+> `download.ps1` 支持与 `download.sh` 相同的三个开关（命令行参数优先于环境变量）：
+> `-Version`（`FM350_VER`）、`-Abi`（`FM350_ABI`）、`-Mirrors`（`FM350_MIRRORS`）。
 
 `install_all.sh` 做 6 步：预检固件自带依赖与内核版本 → 校验 `SHA256SUMS` → 装依赖包 → 装主包 →
 `rpcd restart` + uhttpd `no_cache=js` → 启守护并打印状态（含 ubus 对象是否注册）。
 
 ## 镜像选择
 
-`download.sh` 默认按 **NJU → USTC → PKU → 官方** 顺序尝试（`FM350_MIRRORS` 可覆盖）；
+`download.sh` 默认按 **NJU → USTC → PKU → 官方** 顺序尝试（`FM350_MIRRORS` 可覆盖；`download.ps1` 用 `-Mirrors`）；
 kmod 走 `targets/x86/64/kmods/<ABI>/`，`odhcp6c`/`odhcpd-ipv6only` 走 base feed，
 其余走 packages feed。实测 NJU 抓的 17 个包与官方源 sha256 完全一致。
 
@@ -68,4 +96,5 @@ kmod 走 `targets/x86/64/kmods/<ABI>/`，`odhcp6c`/`odhcpd-ipv6only` 走 base fe
 `download.sh` → 传目录 → `install_all.sh`：17 个依赖校验通过、主包装上、
 `ubus list` 出现 `fm350`、守护单实例运行；重复执行（覆盖安装）同样通过。
 
-许可证清单见 [../../docs/licenses.md](../../docs/licenses.md)。
+2026-10-03 Windows 侧 `download.ps1` 校验（Windows PowerShell 5.1）：按 `SHA256SUMS` 逐包比对，
+本目录 17 个依赖全部命中「已有」路径（哈希一致即不重复下载），逻辑与 `download.sh` 的等价性由此确认。

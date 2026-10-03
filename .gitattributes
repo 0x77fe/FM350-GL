@@ -13,5 +13,8 @@
 # 校验清单：必须逐字节保持原样（任何转换都会让 sha256sum -c 失效）
 SHA256SUMS -text
 
+# 注意：dist/deps-*/download.ps1 是 Windows PowerShell 脚本，**必须保留 UTF-8 BOM**——
+# PowerShell 5.1 对无 BOM 的 .ps1 按 ANSI（GBK）解码，中文注释与输出会乱码；行尾走 LF 无妨。
+
 # 换行符规则跳过这些目录（第三方参考件即使本地存在也不入库）
 /baseline/ export-ignore

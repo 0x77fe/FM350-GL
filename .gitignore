@@ -44,3 +44,6 @@ desktop.ini
 *.env.*
 .env
 .env.*
+
+# meow-memory 的本地记忆库（会话注入与记忆数据，属本机环境，不入库）
+/.dsh-meow/

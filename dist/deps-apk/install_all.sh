@@ -2,14 +2,22 @@
 # luci-app-fm350 离线安装 —— apk 体系（OpenWrt / ImmortalWrt 25.12 及以后）
 #
 # 目标：ImmortalWrt 25.12.x x86/64（kernel 6.12.94，kmods ABI 6.12.94-1-0413601b1c3f0490e17f340fe09229ea）
-# 前置：在**联网的开发机**上先执行 `sh download.sh` 把依赖下齐并校验，
+# 前置：在**联网的 Windows/Linux 机器**上先跑下载脚本把依赖下齐并校验
+#       （Linux：`sh download.sh`；Windows 原生：`download.ps1`，二者等价），
 #       再把整个目录传到路由器执行本脚本 —— 路由器**不需要联网**
+#     # Linux
 #     sh download.sh
 #     tar -czf - -C dist/deps-apk . | ssh root@<router> "mkdir -p /tmp/deps-apk && tar -xzf - -C /tmp/deps-apk"
+#     # Windows 原生（PowerShell 里的 tar 管道会损坏二进制 → 先打包再传；scp -O 适配 dropbear 无 sftp-server）
+#     powershell -ExecutionPolicy Bypass -File dist\deps-apk\download.ps1
+#     tar -czf "$env:TEMP\deps-apk.tar.gz" -C dist\deps-apk .
+#     scp -O "$env:TEMP\deps-apk.tar.gz" root@<router>:/tmp/
+#     ssh root@<router> "mkdir -p /tmp/deps-apk && tar -xzf /tmp/deps-apk.tar.gz -C /tmp/deps-apk"
+#     # 两边一样：在路由器上离线安装
 #     ssh root@<router> "sh /tmp/deps-apk/install_all.sh"
 #
-# 目录内容：download.sh（联网下载）+ 19 个依赖包 + SHA256SUMS + 主包 luci-app-fm350-*.apk（自建）
-#   · 仓库不含二进制，依赖由 download.sh 按 SHA256SUMS 从官方源取得并校验；
+# 目录内容：download.sh / download.ps1（联网下载，二选一）+ 19 个依赖包 + SHA256SUMS + 主包 luci-app-fm350-*.apk（自建）
+#   · 仓库不含二进制，依赖由下载脚本按 SHA256SUMS 从官方源取得并校验；
 #   · kmod 与固件内核 ABI 强绑定，装错版本 apk 会直接拒绝（所以脚本先预检 ABI）；
 #   · 所有 apk add 都带 --network=no：只用本目录 + 固件已装的包，不访问网络。
 set -e
@@ -48,7 +56,7 @@ echo "[1/6] 校验包完整性（SHA256SUMS）"
 if [ -f SHA256SUMS ]; then
 	n=$(wc -l < SHA256SUMS)
 	sha256sum -c SHA256SUMS >/dev/null && echo "  $n 个依赖校验通过 ✓" || {
-		echo "  !! 校验失败（缺包或内容不符）：请在联网的开发机上先跑本目录的 download.sh，再重新传过来"
+		echo "  !! 校验失败（缺包或内容不符）：请在联网的 Windows/Linux 机器上先跑本目录的下载脚本（download.sh / download.ps1），再重新传过来"
 		sha256sum -c SHA256SUMS | grep -v OK
 		exit 1
 	}
