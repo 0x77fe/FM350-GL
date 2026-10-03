@@ -99,14 +99,25 @@ elif [ -f APP-SHA256SUMS ]; then
 	read -r want name < APP-SHA256SUMS
 	name="${name#./}"
 	echo "== 主包不在本目录 → 从 Release 取：$name =="
-	if curl -fsSL $CURL_OPTS --max-time 600 -o "$name.new" "$RELEASE_BASE/$name" 2>/dev/null \
-		&& [ -s "$name.new" ] && [ "$(sha "$name.new")" = "$want" ]; then
+	got=0; try_n=1
+	while [ "$try_n" -le 3 ]; do
+		if curl -fsSL $CURL_OPTS --max-time 600 -o "$name.new" "$RELEASE_BASE/$name" 2>/dev/null \
+			&& [ -s "$name.new" ] && [ "$(sha "$name.new")" = "$want" ]; then
+			got=1; break
+		fi
+		rm -f "$name.new"
+		if [ "$try_n" -lt 3 ]; then
+			echo "  第 $try_n/3 次失败（GitHub 偶发连不上），3 秒后重试…"
+			sleep 3
+		fi
+		try_n=$((try_n + 1))
+	done
+	if [ "$got" = 1 ]; then
 		mv -f "$name.new" "$name"
 		echo "  已取回 $name（sha256 与 APP-SHA256SUMS 一致）✓"
 		app="$name"
 	else
-		rm -f "$name.new"
-		echo "  !! 取不到或校验失败：GitHub 在国内可能很慢或不可达"
+		echo "  !! 取不到或校验失败（已重试 3 次）：GitHub 在国内可能很慢或不可达"
 		echo "     ① 换镜像/代理重跑：FM350_RELEASE_BASE=<镜像前缀> sh download.sh"
 		echo "     ② 在构建机上自行编译后拷进来："
 		echo "        sh build/build-apk.sh && cp dist/luci-app-fm350-*.apk dist/deps-apk/"

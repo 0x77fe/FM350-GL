@@ -144,19 +144,26 @@ if ($appFile) {
 		$tmpName = "$name.new"
 		Write-Host ('== 主包不在本目录 → 从 Release 取：{0} ==' -f $name)
 		$ok2 = $false
-		try {
-			Invoke-WebRequest -Uri "$ReleaseBase/$name" -OutFile $tmpName -UseBasicParsing -TimeoutSec 600
-			if ((Test-Path -LiteralPath $tmpName) -and ((Get-Item -LiteralPath $tmpName).Length -gt 0) -and ((Get-Sha256 $tmpName) -eq $want)) {
-				Move-Item -LiteralPath $tmpName -Destination $name -Force
-				$ok2 = $true
+		for ($tryN = 1; $tryN -le 3; $tryN++) {
+			try {
+				Invoke-WebRequest -Uri "$ReleaseBase/$name" -OutFile $tmpName -UseBasicParsing -TimeoutSec 600
+				if ((Test-Path -LiteralPath $tmpName) -and ((Get-Item -LiteralPath $tmpName).Length -gt 0) -and ((Get-Sha256 $tmpName) -eq $want)) {
+					Move-Item -LiteralPath $tmpName -Destination $name -Force
+					$ok2 = $true
+					break
+				}
+			} catch { }
+			if (Test-Path -LiteralPath $tmpName) { Remove-Item -LiteralPath $tmpName -Force -ErrorAction SilentlyContinue }
+			if ($tryN -lt 3) {
+				Write-Host ('  第 {0}/3 次失败（GitHub 偶发连不上），3 秒后重试…' -f $tryN)
+				Start-Sleep -Seconds 3
 			}
-		} catch { }
-		if (Test-Path -LiteralPath $tmpName) { Remove-Item -LiteralPath $tmpName -Force -ErrorAction SilentlyContinue }
+		}
 		if ($ok2) {
 			Write-Host ('  已取回 {0}（sha256 与 APP-SHA256SUMS 一致）✓' -f $name)
 			$appFile = Get-Item -LiteralPath $name
 		} else {
-			Write-Host '  !! 取不到或校验失败：GitHub 在国内可能很慢或不可达'
+			Write-Host '  !! 取不到或校验失败（已重试 3 次）：GitHub 在国内可能很慢或不可达'
 			Write-Host '     ① 换镜像/代理重跑：$env:FM350_RELEASE_BASE="<镜像前缀>"; .\download.ps1'
 			Write-Host '     ② 在构建机上自行编译后拷进来：sh build/build-apk.sh && cp dist/luci-app-fm350-*.apk dist\deps-apk\'
 		}
