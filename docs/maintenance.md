@@ -100,5 +100,6 @@ profile.enable 关闭后，状态中的 `profile.disconnect_status` 会显示 `p
 | 出现双实例 | 只用 `/etc/init.d/fm350mgr restart`；`flock` 单实例锁会拒绝第二个实例 |
 | 界面停留在旧版 | 强制刷新（Ctrl+Shift+R）；仍异常时按 `tests/installed-content.sh` 比对安装文件 |
 | problem 为 config | 查看事件中的接口配置失败原因；检查接口名是否占用或 UCI/network 操作是否失败，纠正后自动恢复管理 |
+| 自动重拨失败 | 查看失败日志中的具体 AT 命令及原因；r43 存在 sms_tool 隐藏 OK/ERROR 与严格判定不兼容的回归，r44 改用 `sms_tool -D` 保留终止行，仍拒绝错误、空响应和非零退出 |
 
 恢复演练用 `deploy/simulate.sh`（IPv6 / IPv4 / 拔线三种场景，会中断网络，需保证管理连接走独立 LAN）。

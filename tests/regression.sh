@@ -790,14 +790,25 @@ test_probe_v4_at_rejects_errors_and_process_failure() {
 test_at_transport_status() {
 	local response
 	sms_tool() {
+		local debug=0 cmd
+		while [ "$#" -gt 0 ]; do
+			case "$1" in
+				-D) debug=1; shift ;;
+				-d) shift 2 ;;
+				at) shift; cmd="$1"; break ;;
+				*) return 64 ;;
+			esac
+		done
 		case "$MOCK_AT_MODE" in
+			filtered-success) [ "$debug" = 0 ] || printf 'OK\r\n'; return 0 ;;
+			filtered-error) [ "$debug" = 0 ] || printf '+CME ERROR: 30\r\n'; return 1 ;;
 			success) printf '\r\nOK\r\n'; return 0 ;;
 			nonzero-output) printf 'partial response\r\n'; return 23 ;;
 			nonzero-ok) printf 'OK\r\n'; return 23 ;;
 			timeout-output) printf 'partial response\r\n'; command sleep 3; printf 'OK\r\n'; return 0 ;;
 			empty) return 0 ;;
 			vendor-ati)
-				[ "$4" = ATI ] && { printf 'Fibocom FM350-GL\r\n'; return 0; }
+				[ "$cmd" = ATI ] && { printf 'Fibocom FM350-GL\r\n'; return 0; }
 				printf 'Fibocom FM350-GL\r\n'; return 0
 			;;
 			action-error) printf 'ERROR\r\n'; return 0 ;;
@@ -824,6 +835,14 @@ test_at_transport_status() {
 	at_check /dev/mock 'AT+CGACT=0,3' 5 && fail 'ordinary ERROR accepted as action success'
 	MOCK_AT_MODE=success
 	at_check /dev/mock 'AT+CGACT=0,3' 5 || fail 'valid action OK response rejected'
+	# Real sms_tool hides the terminal result without -D, including successful
+	# action commands with no payload. Preserve that contract in the fixture.
+	MOCK_AT_MODE=filtered-success
+	at_check /dev/mock 'AT+COPS=0,0' 5 || fail 'sms_tool filtered terminal OK was not preserved'
+	dial_now /dev/mock || fail 'realistic sms_tool success did not complete the dial sequence'
+	MOCK_AT_MODE=filtered-error
+	at_check /dev/mock 'AT+CGACT=1,3' 5 && fail 'sms_tool filtered terminal ERROR was accepted'
+	case "$AT_CHECK_REASON" in *'AT+CGACT=1,3'*'+CME ERROR: 30'*) ;; *) fail 'failure command and modem error were lost' ;; esac
 }
 
 # 配置缓存：load_config 之后 fcfg 必须读 uci 的值（而不是全部落到默认值），非法值回退默认

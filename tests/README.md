@@ -14,7 +14,9 @@ busybox ash tests/parse-samples.sh
 
 `install-failures.sh` 用系统 POSIX `sh` 启动。模拟包管理器记录参数；每个负向用例同时断言预期失败原因与安装器调用情况，并通过参数日志确认安装脚本子进程实际调用了 `uname` mock。覆盖 ipk 依赖失败、主包失败、apk 安装失败与缺文件、缺失/空白/格式错误/哈希不符的依赖清单、无效 `META`、本地自编主包不能绕过依赖校验，以及只安装清单内文件。不使用宿主包数据库。
 
-`parse-samples.sh` 用桩 `at_run` 校验厂商解析与 AT 判定：频段与带宽换算、NR/LTE 小区字段、CESQ 有效位与 255/缺失降级、载波聚合已激活/未激活/无 PCC，以及 ERROR 与 OK 同时出现时拒绝更新快照。样本按 AT 手册字段构造，接入模组后应替换为真实抓包（尤其 `AT+GTDNS` 的响应格式尚无实测）。
+`parse-samples.sh` 用桩 `at_run` 校验厂商解析与 AT 判定：频段与带宽换算、NR/LTE 小区字段、CESQ 有效位与 255/缺失降级、载波聚合已激活/未激活/无 PCC，以及 ERROR 与 OK 同时出现时拒绝更新快照。样本按 AT 手册字段构造，接入模组后应替换为真实抓包（当前真实 AT 验证范围见文末生产记录）。
+
+AT 传输用例另模拟 sms_tool 默认隐藏终止 OK/ERROR、仅 `-D` 输出终止行的行为，验证真实传输层保留终止响应后可完成完整拨号序列，且失败日志保留命令与模组错误码。
 
 ## 视图测试（任意装有 Node.js ≥ 18 的机器）
 
@@ -43,4 +45,6 @@ sh tests/installed-content.sh
 
 `192.168.4.2`（ImmortalWrt 25.12.1 / apk）与 `192.168.4.3`（ImmortalWrt 24.10.5 / opkg）均升级到 r43，通过安装内容检查（21 个文件，含配置模板，排除用户 UCI 配置）及 RPC/开关冒烟测试；原配置已保留并恢复，最终状态为 `ABSENT`。
 
-本轮版本为 `1.0.0-r43`，使用 ImmortalWrt 25.12.1 SDK 与 OpenWrt 24.10.5 SDK 构建。发布下载清单锚定 `v1.0.0-r43` 的 APK/IPK 文件名与 SHA-256，发布时成对上传并核对 Release 资产 digest。`views-smoke.mjs` 按 luci.js 的契约校验 `require` 模块必须返回 Class 子类，并可直接指向路由器下发的资源目录复核已装文件。两台测试机未连接模组；真实拨号、USB 重枚举、数据面假死及运营商 IPv6 恢复仍需硬件演练。
+当前发布版本为 `1.0.0-r44`，使用 ImmortalWrt 25.12.1 SDK 与 OpenWrt 24.10.5 SDK 构建。发布下载清单锚定 `v1.0.0-r44` 的 APK/IPK 文件名与 SHA-256，发布时成对上传并核对 Release 资产 digest。`views-smoke.mjs` 按 luci.js 的契约校验 `require` 模块必须返回 Class 子类，并可直接指向路由器下发的资源目录复核已装文件。两台测试机未连接模组；真实拨号、USB 重枚举、数据面假死及运营商 IPv6 恢复仍需硬件演练。
+
+2026-10-10 生产修复验证：r44 修复 r43 与 sms_tool 实际输出的兼容性回归，构建机回归（含锁和 AT 传输）、解析样本、IPK 22 个包内文件校验和 APK 假根安装内容校验通过。IPK 安装到 `192.168.31.1` 后已在真实 FM350 上确认自动拨号、`AT+CFUN?` / `AT+CGPADDR=3` / `AT+GTDNS=3` 响应、IPv4/IPv6 路由与双栈 ping（各 3 次无丢包），状态 ONLINE，AT/小区/CA 快照可用，用户 UCI 配置保留。这次联网验证不等于覆盖所有硬件恢复场景。

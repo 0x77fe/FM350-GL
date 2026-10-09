@@ -15,7 +15,8 @@ at_run()
 	done
 	tmp=$(mktemp "$RU/at.XXXXXX") || exit 1
 	trap 'rm -f "$tmp"' EXIT
-	sms_tool -d "$port" at "$cmd" > "$tmp" 2>&1 9>&- &
+	# sms_tool 默认隐藏终止 OK/ERROR；-D 保留它们，供完整响应判定。
+	sms_tool -D -d "$port" at "$cmd" > "$tmp" 2>&1 9>&- &
 	pid=$!
 	t=0
 	while [ "$t" -lt "$timeout" ] && kill -0 "$pid" 2>/dev/null; do
@@ -76,16 +77,19 @@ at_response_valid()
 # at_check <port> <command>：动作命令需完整 OK 行；ATI 可用合法厂商响应。
 at_check()
 {
-	local port="$1" cmd="$2" response
+	local port="$1" cmd="$2" response status
 	AT_CHECK_REASON=""
-	if ! response=$(at_run "$@"); then
+	if response=$(at_run "$@"); then :; else
+		status=$?
 		AT_CHECK_REASON=$(printf '%s\n' "$response" | tr -d '\r' | awk '/ERROR/ { print; exit }')
-		[ -n "$AT_CHECK_REASON" ] || AT_CHECK_REASON="AT 命令执行失败"
+		[ -n "$AT_CHECK_REASON" ] || AT_CHECK_REASON="AT 命令执行失败（exit=${status}）"
+		AT_CHECK_REASON="${cmd}：${AT_CHECK_REASON}"
 		return 1
 	fi
 	if ! at_response_valid "$cmd" "$response"; then
 		AT_CHECK_REASON=$(printf '%s\n' "$response" | tr -d '\r' | awk '/^[ \t]*\+?(CME|CMS)[ \t]+ERROR|^[ \t]*ERROR([ :]|$)/ { sub(/^[ \t]+/, ""); print; exit }')
 		[ -n "$AT_CHECK_REASON" ] || AT_CHECK_REASON="响应缺少完整 OK 行"
+		AT_CHECK_REASON="${cmd}：${AT_CHECK_REASON}"
 		return 1
 	fi
 	return 0

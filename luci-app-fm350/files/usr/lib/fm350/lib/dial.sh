@@ -180,6 +180,7 @@ dial_presets()
 dial_now()
 {
 	local port="$1" define pdp apn
+	AT_CHECK_REASON=""
 	define=$(fcfg profile define_connect)
 	pdp=$(fcfg profile pdp_type | tr 'a-z' 'A-Z')
 	apn=$(fcfg profile apn | tr 'a-z' 'A-Z')

@@ -48,9 +48,9 @@ ssh root@<router> "sh /tmp/deps-apk/install_all.sh"
 
 ## 支持范围
 
-- 已按 AT 手册实现并以模拟响应验证的字段：`AT+CGPADDR`（权威 IPv4）、`AT+GTDNS`（运营商 DNS）、`AT+GTCCINFO`（小区与信号）、`AT+CESQ`（SS-RSRP/SS-RSRQ/SS-SINR）、`AT+GTCAINFO`（载波聚合）。真实模组响应仍需硬件验证，尤其 `AT+GTDNS` 的响应格式尚无实测。
+- 已按 AT 手册实现并以模拟响应验证的字段：`AT+CGPADDR`（权威 IPv4）、`AT+GTDNS`（运营商 DNS）、`AT+GTCCINFO`（小区与信号）、`AT+CESQ`（SS-RSRP/SS-RSRQ/SS-SINR）、`AT+GTCAINFO`（载波聚合）。r44 生产验证已确认真实 CGPADDR/GTDNS 响应、成功自动拨号和双栈联网，其余字段仍需更多真实样本验证。
 - 厂商私有调用仅用于取信息：DNS 查询失败使用公共兜底；小区、信号与 CA 查询失败清除对应快照并显示不可用，合法但未完全解析的响应保留原始回显。
-- 未在真实硬件上验证：真实拨号与地址变化、USB 重枚举、数据面假死、运营商侧 IPv6 恢复。相关演练见 [docs/maintenance.md](docs/maintenance.md)。
+- 待完整硬件演练：USB 重枚举后的恢复、数据面假死、运营商侧 IPv6 恢复及长时间稳定性。单次生产拨号与联网成功不能替代这些演练，见 [docs/maintenance.md](docs/maintenance.md)。
 
 ## 常见问题
 

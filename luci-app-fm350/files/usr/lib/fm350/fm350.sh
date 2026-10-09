@@ -378,7 +378,7 @@ handle_req()
 			event "UI 指令: 重新拨号"
 			if [ -n "$port" ] && [ -e "$port" ]; then
 				if ! dial_attempt "$port"; then
-					event "UI 重拨失败：AT 命令未成功"
+					event "UI 重拨失败：${AT_CHECK_REASON:-AT 命令未成功}"
 				fi
 			fi
 		;;
@@ -519,7 +519,7 @@ cycle()
 		if [ $((now - LAST_DIAL)) -ge 60 ] && [ "$R_LEVEL" -le 1 ]; then
 			event "重拨（AT+CGACT=1,${define}）"
 			if ! dial_attempt "$D_AT_PORT" "$now"; then
-				event "自动重拨失败：AT 命令未成功"
+				event "自动重拨失败：${AT_CHECK_REASON:-AT 命令未成功}"
 			fi
 		fi
 		escalate_v4 "$now"
