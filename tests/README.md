@@ -41,4 +41,4 @@ sh tests/installed-content.sh
 
 2026-10-09 验证环境：Linux 原生 SDK 构建机（apk：ImmortalWrt 25.12.1 SDK；ipk：OpenWrt 24.10.5 SDK）、ImmortalWrt 25.12.1（apk / kernel 6.12.94）、ImmortalWrt 24.10.5（opkg / kernel 6.6.122）。两台路由器均未连接模组，真实拨号、USB 重枚举、数据面假死及运营商 IPv6 恢复仍需硬件演练。
 
-r39 已发布为 `v1.0.0-r39`（apk 与 ipk 成对），`dist/deps-*/APP-SHA256SUMS` 与 Release 资产一致；Release 资产可用 `gh release view v1.0.0-r39 --json assets` 的 digest 复核。
+r40 已发布为 `v1.0.0-r40`（apk 与 ipk 成对），`dist/deps-*/APP-SHA256SUMS` 与 Release 资产一致；Release 资产可用 `gh release view v1.0.0-r40 --json assets` 的 digest 复核。`views-smoke.mjs` 按 luci.js 的契约校验 `require` 模块必须返回 Class 子类（工厂返回普通对象会直接失败），并可直接指向路由器下发的资源目录复核已装文件。

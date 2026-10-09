@@ -70,6 +70,22 @@ const document = {
 const window = { confirm: () => true, location: { href: '' }, console };
 const _ = s => s;
 
+// LuCI 的类系统：require 加载的模块工厂必须返回 Class 的子类，LuCI 会 new 一次并返回实例。
+// 这里用最小实现复刻该契约，工厂返回普通对象时直接报错——正是 luci.js "factory yields
+// invalid constructor" 的判定（曾经因为 common.js 返回对象而在浏览器里整页加载失败）。
+function BaseClass() {}
+BaseClass.isSubclass = c => typeof c === 'function' && (c === BaseClass || BaseClass.prototype.isPrototypeOf(c.prototype));
+BaseClass.extend = function (props) {
+	const Parent = this;
+	function Cls() { if (typeof this.__init__ === 'function') this.__init__.apply(this, arguments); }
+	Cls.prototype = Object.create(Parent.prototype);
+	Cls.prototype.constructor = Cls;
+	Object.assign(Cls.prototype, props || {});
+	Cls.extend = BaseClass.extend;
+	Cls.isSubclass = BaseClass.isSubclass;
+	return Cls;
+};
+
 // Shared queue: one L.Poll for every module, like the real LuCI singleton.
 const POLL = [];
 const L = {
@@ -102,7 +118,8 @@ function load(name) {
 	const src = fs.readFileSync(file, 'utf8');
 	const scope = {
 		E, document, window, _, console,
-		view: { extend: o => o },
+		baseclass: BaseClass,
+		view: BaseClass.extend({}),
 		ui: { setLoading: () => {}, addTimeLimitedNotification: () => {}, showModal: () => {} },
 		rpc: { declare: spec => (...args) => Promise.resolve((scope.rpcHandlers[spec.method] || (() => ({})))(...args)) },
 		rpcHandlers: {},
@@ -122,7 +139,11 @@ function load(name) {
 		deps[as || dep.replace(/[^a-zA-Z0-9_]/g, '_')] = load(dep).mod;
 	}
 	const names = Object.keys(scope).concat(Object.keys(deps));
-	const mod = new Function(...names, src)(...names.map(k => (k in deps ? deps[k] : scope[k])));
+	const factory = new Function(...names, src)(...names.map(k => (k in deps ? deps[k] : scope[k])));
+	// 复刻 luci.js 的校验与实例化：非 Class 子类即 "factory yields invalid constructor"
+	if (!BaseClass.isSubclass(factory))
+		throw new Error(path.basename(file) + ' factory yields invalid constructor（require 的模块必须返回 baseclass/view 的 extend 结果）');
+	const mod = new factory();
 	const exports = { mod, scope };
 	cache.set(name, exports);
 	return exports;
