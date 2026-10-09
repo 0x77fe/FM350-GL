@@ -58,13 +58,12 @@ FM350_CURL_OPTS=--ssl-no-revoke sh dist/deps-apk/download.sh # Git Bash 证书�
 ## 发布
 
 1. 确定版本：改 `luci-app-fm350/Makefile` 的 `PKG_RELEASE`（`PKG_VERSION` 变更时同步调整）。
-2. 构建两种包并校验：`sh build/build-apk.sh`、`sh build/build-ipk.sh`、`sh build/verify-apk.sh`。
+2. 构建两种包并从源码侧实证：`sh build/build-apk.sh`、`sh build/build-ipk.sh`、`sh build/verify-apk.sh`（apk 假根安装 + 逐文件比对），ipk 用 `ar`/`tar` 解出 control 与 data 后逐文件比对。
 3. 在测试机升级并跑 `tests/installed-content.sh`、`tests/router-smoke.sh`，确认菜单与守护正常。
-4. 用产物刷新 `dist/deps-*/APP-SHA256SUMS`（确切文件名 + sha256）。
-5. 打标签 `v<PKG_VERSION>-r<PKG_RELEASE>`，在同一 Release 里成对上传 apk 与 ipk。
-6. 第三方依赖不进 Release，仍由下载脚本从官方镜像取。
-
-标签版本必须与包内版本一致，apk 与 ipk 必须同批发布；只发布其中一种会让离线目录的主包校验失败。
+4. 用产物刷新 `dist/deps-*/APP-SHA256SUMS`（确切文件名 + sha256）并提交。
+5. 在该提交上打标签 `v<PKG_VERSION>-r<PKG_RELEASE>` 并推送，标签版本必须与包内版本一致。
+6. 成对上传：`gh release create <标签> <apk> <ipk> --title <标签> --notes <一句话功能与支持平台>`；发布后用 `gh release view <标签> --json assets` 的 digest 与本地 sha256 复核，并确认 `releases/latest/download/<包名>` 可下载。
+7. 第三方依赖不进 Release，仍由下载脚本从官方镜像取；只发布其中一种包会让离线目录的主包校验失败。
 
 ## 测试
 

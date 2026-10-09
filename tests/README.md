@@ -41,4 +41,4 @@ sh tests/installed-content.sh
 
 2026-10-09 验证环境：Linux 原生 SDK 构建机（apk：ImmortalWrt 25.12.1 SDK；ipk：OpenWrt 24.10.5 SDK）、ImmortalWrt 25.12.1（apk / kernel 6.12.94）、ImmortalWrt 24.10.5（opkg / kernel 6.6.122）。两台路由器均未连接模组，真实拨号、USB 重枚举、数据面假死及运营商 IPv6 恢复仍需硬件演练。
 
-r39 是测试构建，尚未更新 Release 与离线目录的发布校验清单。
+r39 已发布为 `v1.0.0-r39`（apk 与 ipk 成对），`dist/deps-*/APP-SHA256SUMS` 与 Release 资产一致；Release 资产可用 `gh release view v1.0.0-r39 --json assets` 的 digest 复核。
