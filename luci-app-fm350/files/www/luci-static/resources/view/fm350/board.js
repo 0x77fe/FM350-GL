@@ -211,6 +211,7 @@ return view.extend({
 		var stationVal = E('span', { 'class': 'fm350-mono', 'style': 'font-size:.9rem' }, '—');
 		var usbVal = E('span', { 'class': 'fm350-mono' }, '未发现');
 		var atPortVal = E('span', { 'class': 'fm350-mono' }, '未就绪');
+		var snapshotVal = E('span', { 'class': 'fm350-mono', 'style': 'font-size:.85rem' }, '未采集');
 
 		var sig = signalBlock();
 		var ca = caBlock();
@@ -224,6 +225,7 @@ return view.extend({
 				row('SIM 卡', simVal),
 				row('运营商', copsVal),
 				row('基站', stationVal),
+				row('信息快照', snapshotVal),
 				E('div', { 'class': 'fm350-row', 'style': 'align-items:flex-start' }, [
 					E('span', { 'class': 'fm350-label' }, '载波聚合'),
 					ca.el
@@ -240,6 +242,7 @@ return view.extend({
 		// 卡片2: 网络与拨号状态
 		var badge = E('span', { 'class': 'fm350-badge' }, '未知');
 		var probVal = E('span', {}, '一切正常');
+		var disconnectVal = E('span', {}, '—');
 		var v4Text = E('span', { 'class': 'fm350-mono' }, '未拨通');
 		var v4Pill = E('span', { 'class': 'fm350-pill fm350-bad' }, '路由丢失');
 		var v6Text = E('span', { 'class': 'fm350-mono' }, '无');
@@ -253,6 +256,7 @@ return view.extend({
 				E('h3', { 'class': 'fm350-title' }, '🌐 网络与拨号状态'),
 				E('p', { 'class': 'fm350-sub' }, '守护自动恢复 · 每 5s 刷新'),
 				row('拨号状态', badge),
+				row('停用断开', disconnectVal),
 				row('当前问题', probVal),
 				row('IPv4', E('span', {}, [ v4Text, v4Pill ])),
 				row('IPv6', E('span', {}, [ v6Text, v6Pill ])),
@@ -266,6 +270,17 @@ return view.extend({
 			var net = state.net || {};
 			var usb = state.usb || {};
 			var cc = state.cell || {};
+			var snaps = state.snapshot || {};
+			function snapshotAge(name, fallbackAge) {
+				var item = snaps[name] || {};
+				if (!item.updated_at)
+					return '未采集';
+				if (!item.available)
+					return '不可用';
+				var maxAge = item.interval || fallbackAge;
+				var age = Math.max(0, Math.floor(Date.now() / 1000 - item.updated_at));
+				return age > maxAge * 2 ? '陈旧 ' + age + 's' : age + 's';
+			}
 
 			// 模组信息
 			setText(modelVal, '-');
@@ -291,6 +306,8 @@ return view.extend({
 				(cc.band ? ' · Band ' + cc.band : '') || '—');
 			setText(usbVal, (usb.path || '未发现') + (usb.vid ? ' · ' + usb.vid + ':' + usb.pid : ''));
 			setText(atPortVal, net.at_port || '未就绪');
+			setText(snapshotVal, 'AT ' + snapshotAge('at', 30) + ' · 小区 ' + snapshotAge('cell', 120) +
+				' · CA ' + snapshotAge('ca', 120));
 			sig.update(cc);
 			ca.update(state.ca);
 
@@ -299,6 +316,14 @@ return view.extend({
 			setText(badge, common.stateName(netState));
 			badge.style.background = common.stateColor(netState);
 			card2Bar.style.background = common.stateColor(netState);
+			var profile = state.profile || {};
+			var disconnectNames = {
+				enabled: '拨号已启用',
+				disabled: '已停用 / PDP 已断开',
+				pending: '待断开',
+				failed: '断开失败，稍后重试'
+			};
+			setText(disconnectVal, disconnectNames[profile.disconnect_status] || '—');
 
 			setText(probVal, state.problem
 				? state.problem_name + ' · L' + state.recovery_level + ' · ' + state.elapsed + 's'

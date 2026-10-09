@@ -44,12 +44,12 @@ ssh root@<router> "mkdir -p /tmp/deps-apk && tar -xzf /tmp/deps-apk.tar.gz -C /t
 ssh root@<router> "sh /tmp/deps-apk/install_all.sh"
 ```
 
-安装后只用 `/etc/init.d/fm350mgr restart` 操作守护；手动 kill/start 会与 procd respawn 叠加出双实例。旧 modem 链路（luci-app-modem / ModemManager）的迁移与回滚见 [docs/maintenance.md](docs/maintenance.md)。
+安装后只用 `/etc/init.d/fm350mgr restart` 操作守护；手动 kill/start 会与 procd respawn 叠加出双实例。
 
 ## 支持范围
 
-- 已按 AT 手册解析并在测试机上验证的字段：`AT+CGPADDR`（权威 IPv4）、`AT+GTDNS`（运营商 DNS）、`AT+GTCCINFO`（小区与信号）、`AT+CESQ`（SS-RSRP/SS-RSRQ/SS-SINR）、`AT+GTCAINFO`（载波聚合）。
-- 厂商私有调用仅用于取信息，失败一律降级：DNS 用公共兜底、信号显示原始回显，不影响上网主链路。
+- 已按 AT 手册实现并以模拟响应验证的字段：`AT+CGPADDR`（权威 IPv4）、`AT+GTDNS`（运营商 DNS）、`AT+GTCCINFO`（小区与信号）、`AT+CESQ`（SS-RSRP/SS-RSRQ/SS-SINR）、`AT+GTCAINFO`（载波聚合）。真实模组响应仍需硬件验证，尤其 `AT+GTDNS` 的响应格式尚无实测。
+- 厂商私有调用仅用于取信息：DNS 查询失败使用公共兜底；小区、信号与 CA 查询失败清除对应快照并显示不可用，合法但未完全解析的响应保留原始回显。
 - 未在真实硬件上验证：真实拨号与地址变化、USB 重枚举、数据面假死、运营商侧 IPv6 恢复。相关演练见 [docs/maintenance.md](docs/maintenance.md)。
 
 ## 常见问题
@@ -63,14 +63,14 @@ ssh root@<router> "sh /tmp/deps-apk/install_all.sh"
 | 取主包失败（GitHub 不可达） | `FM350_RELEASE_BASE=<镜像前缀>` 换源；或在构建机自编后拷入离线目录并用 `FM350_LOCAL_APP=1` 放行 |
 | Git Bash 报 `curl: (35) CRYPT_E_REVOCATION_OFFLINE` | `FM350_CURL_OPTS=--ssl-no-revoke sh download.sh`，或改用 `download.ps1` |
 | 想确认配置是否生效 | `sh /usr/lib/fm350/fm350.sh check`；事件与运行日志见「日志」页 |
+| 状态显示「网络接口配置」 | 查看事件中的接口冲突或配置失败原因，使用不与现有用户配置冲突的接口名；纠正后下一轮恢复管理 |
 
 ## 文档
 
 - [docs/architecture.md](docs/architecture.md)：组件分层、主循环、状态机、恢复阶梯、拨号时序、UI 数据流、日志治理。
-- [docs/maintenance.md](docs/maintenance.md)：构建、离线目录与清单、安装、升级与发布、迁移与回滚、测试与排障。
+- [docs/maintenance.md](docs/maintenance.md)：构建、离线目录与清单、安装、升级与发布、测试与排障。
 - [tests/README.md](tests/README.md)：各测试脚本的覆盖面与运行方式。
-- 旧链路参考件保存在 `baseline/`（不入库）。
 
 ## 许可
 
-GPL-3.0-only。`luci-app-fm350/files/usr/lib/fm350/fibocom.sh` 含抽取并修改自 luci-app-modem 的代码，版权与来源声明保留在该文件头部。
+GPL-3.0-only。

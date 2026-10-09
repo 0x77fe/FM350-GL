@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-fm350
 PKG_VERSION:=1.0.0
-PKG_RELEASE:=40
+PKG_RELEASE:=43
 # GPL-3.0-only：本包含从 luci-app-modem（GPLv3，作者 Siriling）抽取并修改的代码，
 # 见 files/usr/lib/fm350/fibocom.sh 头部声明。
 PKG_LICENSE:=GPL-3.0-only

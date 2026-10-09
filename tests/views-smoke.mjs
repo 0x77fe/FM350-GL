@@ -151,12 +151,18 @@ function load(name) {
 
 const richState = {
 	state: 'RECOVERING', problem: 'v4', problem_name: 'IPv4', recovery_level: 2, elapsed: 61,
+	profile: { enabled: false, disconnect_status: 'failed' },
 	usb: { present: true, path: '1-3', devnode: '/dev/bus/usb/001/004', vid: '0e8d', pid: '7127' },
 	net: {
 		ifname: 'wwan_5g_0', at_port: '/dev/ttyUSB2', v4_at: '10.20.30.40', v4_kernel: '10.20.30.40',
 		v4_route: true, v6: '240e::1', v6_route: false, v6_gw: '', rx: 12345, tx: 67890
 	},
 	at: { ati: 'FM350-GL\nRevision: 1.0.0', cpin: '+CPIN: READY', cops: '+COPS: 0,0,"CHN-UNICOM",11' },
+	snapshot: {
+		at: { updated_at: Math.floor(Date.now() / 1000) - 500, available: true },
+		cell: { updated_at: Math.floor(Date.now() / 1000) - 300, available: true },
+		ca: { updated_at: Math.floor(Date.now() / 1000), available: false }
+	},
 	cell: {
 		rat: 'NR', netmode: 'NR5G-SA', mcc: '460', mnc: '01', tac: '1a2b', cellid: '1234567',
 		band: '78', bw: '100', rsrp: '-95', rsrq: '-11', sinr: '18', ss_rsrp: '-94', ss_rsrq: '-10',
@@ -199,7 +205,7 @@ async function main() {
 		const node = board.mod.render(await board.mod.load());
 		if (!node || node.tagName !== 'div') throw new Error('render did not return a node');
 		expectText(collect(node), ['恢复中', 'FM350-GL', 'CHN-UNICOM', '10.20.30.40', '240e::1', '12.1 KB',
-			'66.3 KB', 'IPv4 · L2 · 61s', '已激活 ×1', '-95 dBm', '18 dB'], 'board');
+			'66.3 KB', '断开失败，稍后重试', 'IPv4 · L2 · 61s', '已激活 ×1', '-95 dBm', '18 dB'], 'board');
 		markConnected(node);
 	});
 
@@ -221,9 +227,13 @@ async function main() {
 		const node = board.mod.render({ state: st, at: st.at });
 		markConnected(node);
 		expectText(collect(node), ['IPv4 · L2 · 61s', 'CHN-UNICOM · NR', '已激活 ×1'], 'board initial');
+		const snapshotText = collect(node);
+		if (!snapshotText.includes('信息快照') || !snapshotText.includes('AT 陈旧') || !snapshotText.includes('CA 不可用'))
+			throw new Error('snapshot freshness/unavailable state not rendered');
 
 		const st2 = {
-			state: 'ONLINE', problem: '', elapsed: 0,
+			state: 'DISABLED', problem: '', elapsed: 0,
+			profile: { enabled: false, disconnect_status: 'pending' },
 			usb: { present: true, path: '1-3', vid: '0e8d', pid: '7127' },
 			net: { at_port: '/dev/ttyUSB2', v4_at: '10.0.0.9', v4_route: true, v6: '240e::2', v6_route: true, rx: 1, tx: 2 },
 			at: { ati: 'FM350-GL\nRevision: 2', cpin: '+CPIN: READY', cops: '+COPS: 0,0,"CMCC",7' },
@@ -234,7 +244,8 @@ async function main() {
 		POLL[0].fn();
 		await flush();
 		const t2 = collect(node);
-		expectText(t2, ['在线', '一切正常', 'CMCC · LTE', '10.0.0.9', '240e::2', '-80 dBm', '未聚合', '仅单载波工作'], 'board refresh');
+		expectText(t2, ['拨号已停用', '待断开', '一切正常', 'CMCC · LTE', '10.0.0.9', '240e::2', '-80 dBm', '未聚合', '仅单载波工作'], 'board refresh');
+		if (!t2.includes('AT 未采集')) throw new Error('snapshot state did not refresh with status');
 		if (t2.includes('IPv4 · L2 · 61s')) throw new Error('stale problem text kept');
 		POLL.length = 0;
 	});

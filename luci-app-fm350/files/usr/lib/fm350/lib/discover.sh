@@ -134,13 +134,48 @@ discover_at_port()
 	return 1
 }
 
-# discover_light：仅在有缓存路径时做廉价检查（idVendor），失效才全扫
+# 清除已失效的 USB/网卡/串口引用；扫描冷却只限制 discover_auto 的昂贵探测。
+discover_clear_cached()
+{
+	D_VID=""
+	D_PID=""
+	D_USB_PATH=""
+	D_DEVNODE=""
+	D_IFNAME=""
+	D_AT_PORT=""
+	D_USB_COUNT=0
+}
+
+# discover_light：缓存设备有效时只做廉价检查；失效时先清引用再触发扫描。
 discover_light()
 {
-	local v bus devn
-	if [ -n "$D_USB_PATH" ] && [ -f "/sys/bus/usb/devices/${D_USB_PATH}/idVendor" ]; then
+	local v p bus devn vid_pid expected_vid expected_pid valid
+	valid=0
+	if [ -n "$D_USB_PATH" ] \
+		&& [ -f "/sys/bus/usb/devices/${D_USB_PATH}/idVendor" ] \
+		&& [ -f "/sys/bus/usb/devices/${D_USB_PATH}/idProduct" ]; then
 		v=$(cat "/sys/bus/usb/devices/${D_USB_PATH}/idVendor")
-		[ "$v" = "$D_VID" ] || { discover_scan; return $?; }
+		p=$(cat "/sys/bus/usb/devices/${D_USB_PATH}/idProduct")
+		vid_pid=$(fcfg global usb_vid_pid)
+		if [ -n "$vid_pid" ]; then
+			expected_vid=${vid_pid%%:*}
+			if [ "$expected_vid" = "$vid_pid" ]; then
+				expected_pid=""
+			else
+				expected_pid=${vid_pid#*:}
+			fi
+			[ -n "$expected_vid" ] || expected_vid=0e8d
+			[ -n "$expected_pid" ] || expected_pid=7127
+		else
+			expected_vid="$D_VID"
+			expected_pid="$D_PID"
+		fi
+		if { [ -z "$expected_vid" ] || [ "$v" = "$expected_vid" ]; } \
+			&& { [ -z "$expected_pid" ] || [ "$p" = "$expected_pid" ]; }; then
+			valid=1
+		fi
+	fi
+	if [ "$valid" = "1" ]; then
 		# 重枚举后设备节点会变化，重算 devnode
 		bus=$(cat "/sys/bus/usb/devices/${D_USB_PATH}/busnum" 2>/dev/null)
 		devn=$(cat "/sys/bus/usb/devices/${D_USB_PATH}/devnum" 2>/dev/null)
@@ -148,5 +183,6 @@ discover_light()
 		[ -n "$bus" ] && [ -n "$devn" ] && D_DEVNODE=$(printf "/dev/bus/usb/%03d/%03d" "$bus" "$devn")
 		return 0
 	fi
+	discover_clear_cached
 	discover_scan
 }

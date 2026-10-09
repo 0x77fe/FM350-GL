@@ -6,7 +6,6 @@
 #   1. 25.12 起包管理器是 apk；自行构建的包没进官方密钥，必须 --allow-untrusted；
 #   2. 官方 x86/64 镜像不含任何 kmod-usb-*，USB 主机控制器与 RNDIS/串口驱动都要现装；
 #      kmod 必须与固件内核同 ABI，装错版本 apk 直接拒绝（故不把 kmod 写进包依赖）；
-#   3. 无 luci-app-modem / ModemManager 拆迁动作：25.12 全新固件没有这些遗留。
 #
 # 路由器不联网时用离线包（kmod/jq/sms-tool 全在包里，apk 走 --network=no）。
 # 先在联网机器上跑 dist/deps-apk 的 download.sh 或 download.ps1 把依赖下齐，再整包传到路由器安装。
@@ -31,12 +30,7 @@ echo "[3/6] 重启 rpcd（否则 ubus 对象 fm350 不注册，页面全空）..
 /etc/init.d/rpcd restart
 sleep 2
 
-echo "[4/6] uhttpd 与静态资源缓存..."
-# LuCI 静态 JS 在本固件上不带 Cache-Control（uhttpd 的 no_cache 选项不生效），
-# 资源 URL 形如 ?v=<luciversion>-<包数据库 mtime>，装包后才会变化；
-# 这里再 touch 一次刷新 ETag，并提示升级后强制刷新浏览器。
-uci -q get uhttpd.main.no_cache | grep -q js || { uci set uhttpd.main.no_cache='js'; uci commit uhttpd; }
-/etc/init.d/uhttpd restart >/dev/null 2>&1 || true
+echo "[4/6] 刷新静态资源 ETag..."
 touch /www/luci-static/resources/view/fm350/*.js /www/luci-static/resources/fm350/*.js 2>/dev/null || true
 echo "  提示：浏览器仍显示旧界面或报错时，请强制刷新一次（Ctrl+Shift+R）"
 

@@ -51,4 +51,4 @@ ssh root@<router> "sh /tmp/deps-apk/install_all.sh"
 
 内核模块必须与固件 ABI 完全一致。改 `META`（或 `FM350_VER=` / `FM350_ABI=`）后在构建机执行 `sh build/fetch-deps-apk.sh` 重抓依赖并刷新 `SHA256SUMS` 与 `META`；主包由 `sh build/build-apk.sh` 产出。
 
-构建、发布、迁移与回滚、排障见 [../../docs/maintenance.md](../../docs/maintenance.md)。
+构建、发布与排障见 [../../docs/maintenance.md](../../docs/maintenance.md)。

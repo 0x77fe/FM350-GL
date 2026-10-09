@@ -17,9 +17,40 @@ DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 cd "$DIR"
 
 # 固件版本、目标架构与内核版本只来自 META，不再在各脚本里各写一份
-[ -f META ] || { echo "缺少 META（固件版本与内核版本），请与下载脚本一起拷贝本目录"; exit 1; }
+validate_meta()
+{
+	[ -s META ] || { echo "缺少或为空的 META（固件版本与内核版本）"; exit 1; }
+	awk -F= '
+		/^[[:space:]]*#/ || /^[[:space:]]*$/ { next }
+		NF != 2 { bad=1; next }
+		$1 !~ /^FM350_(VER|TARGET|PKGARCH|KERNEL|ABI)$/ { bad=1; next }
+		$2 !~ /^[-A-Za-z0-9._\/~+]+$/ { bad=1; next }
+		seen[$1]++ { bad=1 }
+		END {
+			n=split("FM350_VER,FM350_TARGET,FM350_PKGARCH,FM350_KERNEL,FM350_ABI", required, ",")
+			for (i=1; i<=n; i++) if (seen[required[i]] != 1) bad=1
+			if (bad) exit 1
+		}' META || { echo "META 格式无效（需包含唯一且有效的 FM350_VER/TARGET/PKGARCH/KERNEL/ABI）"; exit 1; }
+}
+
+validate_manifest()
+{
+	[ -s SHA256SUMS ] || { echo "依赖清单 SHA256SUMS 缺失或为空"; exit 1; }
+	awk '
+		NF != 2 { bad=1; next }
+		length($1) != 64 || $1 !~ /^[A-Fa-f0-9]+$/ { bad=1; next }
+		$2 !~ /^\.\/[A-Za-z0-9][A-Za-z0-9_.+~-]*\.ipk$/ { bad=1; next }
+		seen[$2]++ { bad=1 }
+		{ count++ }
+		END { if (count < 1 || bad) exit 1 }
+	' SHA256SUMS || { echo "依赖清单 SHA256SUMS 格式无效"; exit 1; }
+	sha256sum -c SHA256SUMS >/dev/null 2>&1 || { echo "依赖清单 SHA256SUMS 校验失败（缺包或哈希不符）"; exit 1; }
+}
+
+validate_meta
 . ./META
 KERNEL_VER="${FM350_KERNEL:-}"
+validate_manifest
 
 # pick_local_app <glob>：本地自编主包按 -r<release> 的数字取最大（仅 FM350_LOCAL_APP 放行路径用）
 pick_local_app()
@@ -57,21 +88,12 @@ esac
 
 echo "[1/6] 校验包完整性（SHA256SUMS）"
 DEP_LIST=""
-if [ -f SHA256SUMS ]; then
-	n=$(wc -l < SHA256SUMS)
-	sha256sum -c SHA256SUMS >/dev/null && echo "  $n 个依赖校验通过 ✓" || {
-		echo "  !! 校验失败（缺包或内容不符）：请在联网的 Windows/Linux 机器上先跑本目录的下载脚本（download.sh / download.ps1），再重新传过来"
-		sha256sum -c SHA256SUMS | grep -v OK
-		exit 1
-	}
-	# 安装文件只取清单里列出且已校验通过的那些，不用通配符
-	while read -r _want _file; do
-		[ -n "$_file" ] || continue
-		DEP_LIST="$DEP_LIST ./${_file#./}"
-	done < SHA256SUMS
-else
-	echo "  (无 SHA256SUMS，跳过)"
-fi
+n=$(wc -l < SHA256SUMS)
+echo "  $n 个依赖校验通过 ✓"
+# 安装文件只取清单里列出且已校验通过的那些，不用通配符
+while read -r _want _file; do
+	DEP_LIST="$DEP_LIST ./${_file#./}"
+done < SHA256SUMS
 
 # 主包：按 APP-SHA256SUMS 里的确切文件名与 sha256 校验（防旧版本 / 截断 / 被替换）
 # 本地自编包（build/build-ipk.sh）用于测试时，用 FM350_LOCAL_APP=1 显式放行
@@ -105,12 +127,6 @@ fi
 echo "[2/6] 安装依赖包（kmod / sms-tool / jq / odhcp6c / odhcpd-ipv6only）"
 if [ -n "$DEP_LIST" ]; then
 	opkg install $DEP_LIST
-else
-	opkg install ./kmod-usb-core_*.ipk ./kmod-usb2_*.ipk ./kmod-usb3_*.ipk \
-		./kmod-usb-ehci_*.ipk ./kmod-usb-ohci_*.ipk ./kmod-usb-xhci-hcd_*.ipk \
-		./kmod-usb-net_*.ipk ./kmod-usb-net-cdc-ether_*.ipk ./kmod-usb-net-rndis_*.ipk \
-		./kmod-usb-acm_*.ipk ./kmod-usb-serial_*.ipk ./kmod-usb-serial-wwan_*.ipk \
-		./kmod-usb-wdm_*.ipk ./sms-tool_*.ipk ./jq_*.ipk ./odhcp6c_*.ipk ./odhcpd-ipv6only_*.ipk
 fi
 
 echo "[3/6] 安装 $APP"
@@ -120,12 +136,7 @@ echo "[4/6] 重启 rpcd（否则 ubus 对象 fm350 不注册，页面全空）"
 /etc/init.d/rpcd restart
 sleep 2
 
-echo "[5/6] uhttpd 与静态资源缓存"
-# LuCI 静态 JS 在本固件上不带 Cache-Control（uhttpd 的 no_cache 选项不生效），
-# 资源 URL 形如 ?v=<luciversion>-<包数据库 mtime>，只在装包后变化；
-# 装包本身已让它变化，这里再 touch 文件刷新 ETag，并提示升级后强制刷新一次。
-uci -q get uhttpd.main.no_cache | grep -q js || { uci set uhttpd.main.no_cache='js'; uci commit uhttpd; }
-/etc/init.d/uhttpd restart >/dev/null 2>&1 || true
+echo "[5/6] 刷新静态资源 ETag"
 touch /www/luci-static/resources/view/fm350/*.js /www/luci-static/resources/fm350/*.js 2>/dev/null || true
 echo "  提示：浏览器仍显示旧界面或报错时，请强制刷新一次（Ctrl+Shift+R）"
 # stop → 停顿 → start：procd 对 restart 的 stop/start 竞争会产生双实例记录

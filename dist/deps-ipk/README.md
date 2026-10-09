@@ -47,10 +47,8 @@ ssh root@<router> "sh /tmp/deps-ipk/install_all.sh"
 
 传输注意：OpenWrt 的 dropbear 不带 sftp-server，OpenSSH 9+ 客户端默认走 SFTP 会失败，用 `tar` 管道或 `scp -O`。
 
-老 modem 链路迁移与回滚：`deploy/migrate_modem.sh`（由 `deploy/install_fm350.sh` 默认调用）与 `deploy/rollback_fm350.sh`。
-
 ## 换固件版本
 
 内核模块必须与固件内核完全一致。改 `META`（或 `FM350_VER=` / `FM350_ABI=`）后按对应版本重新获取依赖；主包由 `sh build/build-ipk.sh` 产出。
 
-构建、发布、迁移与回滚、排障见 [../../docs/maintenance.md](../../docs/maintenance.md)。
+构建、发布与排障见 [../../docs/maintenance.md](../../docs/maintenance.md)。

@@ -47,14 +47,25 @@ FM350_CURL_OPTS=--ssl-no-revoke sh dist/deps-apk/download.sh # Git Bash 证书�
 
 换固件版本（含小版本）需要重抓依赖：改 `META`（或 `FM350_VER=` / `FM350_ABI=`）后跑 `sh build/fetch-deps-apk.sh`。`FM350_ABI` 未给出时读 `META`，显式留空则自动探测，探测到多个候选会列出并失败。
 
+## network 接口归属
+
+守护在 `/etc/config/fm350` 的 global 区保存 `managed_v4_ifname` 与 `managed_v6_ifname`。这两项由程序维护，不在 LuCI 表单编辑；它们记录上次成功对账的 IPv4 / IPv6 接口名，供升级和守护重启后清理旧接口及 WAN 防火墙引用。
+
+改名时，守护先检查目标 section。现有目标若不是 interface 类型，或不属于项目且不符合完整 FM350 接口形状，会记录“接口配置冲突”并跳过本轮；不会删除或覆盖该 section。接口对账失败时状态为 `RECOVERING`、`problem=config`，暂停后续拨号、地址刷新与自动恢复；纠正配置后下一轮重新对账，成功后恢复管理。已经记录归属的旧接口会先 ifdown，再从 network 与 WAN zone 移除。network 只有在实际配置变化时才 commit/reload；v6 alias 改动会先 ifdown 旧 DHCPv6 接口。
+
+缺少归属记录的升级旧配置按保守规则处理：当前配置指向的 section 只有完整匹配 FM350 设备、协议与关键选项时才可接管；其他名称即使看起来像 FM350 默认名，也不会仅凭名称删除。已知的未登记历史默认接口会发出提示并保留，管理员确认后可自行清理。
+
+## 停用拨号后的断开
+
+profile.enable 关闭后，状态中的 `profile.disconnect_status` 会显示 `pending`、`failed` 或 `disabled`。断开失败每 30 秒重试，失败日志最多每 300 秒重复一次；设备离线时保持 pending，设备和 AT 口恢复后继续。重新启用会取消待断开任务。检查 `/var/run/fm350/events.log` 可查看最新 AT 失败原因。
+
 ## 安装与升级
 
 - 离线安装按包管理器选对应目录，步骤见 [README.md](../README.md#快速安装)。
 - 升级主包：路由器上执行同目录 `install_all.sh`，或 `apk add --allow-untrusted <包>` / `opkg install <包>`。
 - 安装后 `rpcd` 必须重启，否则 ubus 对象 `fm350` 不注册，页面无数据。
 - 守护操作只用 `/etc/init.d/fm350mgr restart`。
-- 升级后浏览器可能继续使用旧的前端副本：LuCI 静态 JS 在这些固件上不带 `Cache-Control`（`uhttpd` 的 `no_cache` 选项不生效），资源 URL 形如 `?v=<luciversion>-<包数据库 mtime>`，只在装包后变化。升级脚本会 touch JS 文件刷新 ETag 并提示强制刷新；页面仍异常时先按 Ctrl+Shift+R 或在开发者工具里勾选 Disable cache 再刷新，再确认已装文件与源码一致（`tests/installed-content.sh`）。
-- 24.10 老 modem 链路（luci-app-modem / ModemManager）：`deploy/install_fm350.sh` 默认调用 `deploy/migrate_modem.sh`，可用 `FM350_SKIP_MIGRATE=1` 跳过，`FM350_MIGRATE_BACKUP=<目录>` 指定备份位置。迁移把旧脚本、rc 链接、热插拔脚本与 `/etc/config/modem` 移入 `/root/backup/fm350-legacy-<时间戳>`，并生成 `MANIFEST` 与 `rollback.sh`；还原用 `sh deploy/rollback_fm350.sh [备份目录]`，不依赖 `/var/trash`。
+- 升级后浏览器可能继续使用旧的前端副本：LuCI 静态 JS 在这些固件上不带有效的 `Cache-Control`，配置 `uhttpd.main.no_cache` 不会解决该问题。安装脚本会 touch JS 文件刷新 ETag 并提示强制刷新；页面仍异常时先按 Ctrl+Shift+R 或在开发者工具里勾选 Disable cache 再刷新，再确认已装文件与源码一致（`tests/installed-content.sh`）。
 
 ## 发布
 
@@ -70,8 +81,8 @@ FM350_CURL_OPTS=--ssl-no-revoke sh dist/deps-apk/download.sh # Git Bash 证书�
 
 | 脚本 | 位置 | 覆盖 |
 |---|---|---|
-| `regression.sh` | 构建机 / 路由器 | 恢复计时、开关、IPv6 升级、请求邮箱、实例锁、串口互斥、配置校验与缓存 |
-| `install-failures.sh` | 构建机 / 路由器 | 安装负向路径与清单驱动的文件选择 |
+| `regression.sh` | 构建机 / 路由器 | 停用断开重试、IPv6 升级后快照恢复、AT 响应判定、接口归属迁移与冲突保护、恢复与会话计时、路由解析、锁与配置缓存 |
+| `install-failures.sh` | 构建机 / 路由器 | META/依赖清单校验、安装失败传播、本地包放行与清单驱动的文件选择 |
 | `parse-samples.sh` | 构建机 / 路由器 | 厂商解析样本（手册字段，接入模组后替换为真实抓包） |
 | `views-smoke.mjs` | 任意 Node ≥ 18 | 六个视图模块的渲染、原位刷新、轮询注销、require 解析 |
 | `router-smoke.sh` / `installed-content.sh` | 测试机 | 真实 RPC 与开关行为、已安装内容与源码比对 |
@@ -87,6 +98,7 @@ FM350_CURL_OPTS=--ssl-no-revoke sh dist/deps-apk/download.sh # Git Bash 证书�
 | kmod 安装被拒 | `META` 的内核 ABI 与固件不一致，重抓对应版本依赖 |
 | 主包校验失败 | `APP-SHA256SUMS` 未按当前产物更新，或用了自编包而没有 `FM350_LOCAL_APP=1` |
 | 出现双实例 | 只用 `/etc/init.d/fm350mgr restart`；`flock` 单实例锁会拒绝第二个实例 |
-| 界面停留在旧版 | uhttpd 缓存：`uci set uhttpd.main.no_cache='js'` 后重启 uhttpd |
+| 界面停留在旧版 | 强制刷新（Ctrl+Shift+R）；仍异常时按 `tests/installed-content.sh` 比对安装文件 |
+| problem 为 config | 查看事件中的接口配置失败原因；检查接口名是否占用或 UCI/network 操作是否失败，纠正后自动恢复管理 |
 
 恢复演练用 `deploy/simulate.sh`（IPv6 / IPv4 / 拔线三种场景，会中断网络，需保证管理连接走独立 LAN）。

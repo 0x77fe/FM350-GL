@@ -13,5 +13,8 @@ while IFS= read -r f; do
 	cmp -s "$f" "$rel" || { echo "FAIL installed content: $rel"; exit 1; }
 	n=$((n+1))
 done < "$LIST"
+cmp -s "$SOURCE/etc/config/fm350" /usr/share/fm350/config.template \
+	|| { echo 'FAIL installed content: /usr/share/fm350/config.template'; exit 1; }
+n=$((n+1))
 [ "$n" -gt 0 ]
 echo "PASS installed-content ($n files; UCI conffile excluded)"

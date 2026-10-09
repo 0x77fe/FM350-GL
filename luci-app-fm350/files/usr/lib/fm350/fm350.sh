@@ -28,7 +28,8 @@ R_SINCE=0
 R_LEVEL=0
 LAST_IFUP=0
 LAST_RESTART=0
-LAST_USBRESET=0
+LAST_USBRESET_ATTEMPT=0
+LAST_USBRESET_SUCCESS=0
 LAST_V6RENEW=0
 V6_RENEW_COUNT=0
 V6_PING_FAILS=0
@@ -36,6 +37,13 @@ LAST_V6PING=0
 LAST_V6DONE=0
 LAST_REC_DONE=0
 LAST_DIAL=0
+PROFILE_ENABLED_LAST=1
+PROFILE_DISABLE_PENDING=0
+PROFILE_DISABLE_FAILED=0
+LAST_DISABLE_ATTEMPT=0
+LAST_DISABLE_LOG=0
+PROFILE_DISABLE_RETRY_INTERVAL=30
+PROFILE_DISABLE_LOG_INTERVAL=300
 LAST_COUNTER_TS=0
 COUNTER_SUM=0
 SESS_SINCE=0
@@ -50,8 +58,14 @@ LAST_CA=0
 SNAP_ATI=""
 SNAP_CPIN=""
 SNAP_COPS=""
-SNAP_CELL=""
-SNAP_CA=""
+SNAP_CELL="{}"
+SNAP_CA="{}"
+SNAP_AT_TS=0
+SNAP_CELL_TS=0
+SNAP_CA_TS=0
+SNAP_SERIAL_READY=0
+LAST_SERIAL_PROBE=0
+SERIAL_PAUSE_UNTIL=0
 SS_RSRP=""
 SS_RSRQ=""
 SS_SINR=""
@@ -71,7 +85,7 @@ P_TX=0
 startup_guard()
 {
 	if pgrep -f "modem_network_task.sh|/usr/share/modem/modem_task.sh|modem_watching.sh" >/dev/null 2>&1; then
-		fm350_log err "检测到旧 modem 守护仍在运行，拒绝启动；请先执行 install_fm350.sh"
+		fm350_log err "检测到其他 modem 守护可能占用串口，拒绝启动；请先停止冲突服务"
 		exit 1
 	fi
 }
@@ -89,11 +103,21 @@ singleton_guard()
 
 write_state()
 {
-	local now state_name problem_name elapsed
+	local now state_name problem_name elapsed profile_enabled disconnect_status
 	now=$(date +%s)
 	elapsed=0
 	[ "$R_SINCE" -gt 0 ] && elapsed=$((now - R_SINCE))
-	if [ "$(fcfg global enabled)" != "1" ] || [ "$(fcfg profile enable)" != "1" ]; then
+	profile_enabled=$(fcfg profile enable)
+	if [ "$profile_enabled" = "1" ]; then
+		disconnect_status="enabled"
+	elif [ "$PROFILE_DISABLE_PENDING" = "1" ] && [ "$PROFILE_DISABLE_FAILED" = "1" ]; then
+		disconnect_status="failed"
+	elif [ "$PROFILE_DISABLE_PENDING" = "1" ]; then
+		disconnect_status="pending"
+	else
+		disconnect_status="disabled"
+	fi
+	if [ "$(fcfg global enabled)" != "1" ] || [ "$profile_enabled" != "1" ]; then
 		state_name="DISABLED"
 	elif [ -z "$D_USB_PATH" ]; then
 		state_name="ABSENT"
@@ -112,10 +136,13 @@ write_state()
 		"v4") problem_name="IPv4" ;;
 		"data") problem_name="数据面" ;;
 		"absent") problem_name="模块离线" ;;
+		"config") problem_name="网络接口配置" ;;
 		*) problem_name="" ;;
 	esac
 	jq -n --arg ts "$now" \
 		--arg st "$state_name" --arg problem "$R_PROBLEM" --arg problem_name "$problem_name" \
+		--arg profile_enabled "$profile_enabled" --arg disconnect_status "$disconnect_status" \
+		--arg disconnect_attempt "$LAST_DISABLE_ATTEMPT" \
 		--arg level "$R_LEVEL" --arg since "$R_SINCE" --arg elapsed "$elapsed" \
 		--arg path "$D_USB_PATH" --arg devnode "$D_DEVNODE" --arg ifname "$D_IFNAME" \
 		--arg vid "$D_VID" --arg pid "$D_PID" \
@@ -125,9 +152,16 @@ write_state()
 		--arg absent_since "$ABSENT_SINCE" --arg sess_since "$SESS_SINCE" \
 		--arg at_ati "$SNAP_ATI" --arg at_cpin "$SNAP_CPIN" --arg at_cops "$SNAP_COPS" \
 		--arg cell_json "$SNAP_CELL" --arg ca_json "$SNAP_CA" \
+		--arg snap_at_ts "$SNAP_AT_TS" --arg snap_cell_ts "$SNAP_CELL_TS" --arg snap_ca_ts "$SNAP_CA_TS" \
+		--arg snap_ca_interval "$(fcfg watch ca_interval)" \
+		--arg snap_at_available "$([ -n "$SNAP_ATI$SNAP_CPIN$SNAP_COPS" ] && echo 1 || echo 0)" \
+		--arg snap_cell_available "$([ "$SNAP_CELL" != "{}" ] && echo 1 || echo 0)" \
+		--arg snap_ca_available "$([ "$SNAP_CA" != "{}" ] && echo 1 || echo 0)" \
 		'{
 			ts: ($ts | tonumber),
 			state: $st, problem: $problem, problem_name: $problem_name,
+			profile: { enabled: ($profile_enabled == "1"), disconnect_status: $disconnect_status,
+			           disconnect_attempt: ($disconnect_attempt | tonumber) },
 			recovery_level: ($level | tonumber), problem_since: ($since | tonumber),
 			elapsed: ($elapsed | tonumber),
 			usb: { present: ($path != ""), path: $path, devnode: $devnode, vid: $vid, pid: $pid },
@@ -139,8 +173,149 @@ write_state()
 			sess_since: ($sess_since | tonumber),
 			at: { ati: $at_ati, cpin: $at_cpin, cops: $at_cops },
 			cell: ($cell_json | fromjson? // {}),
-			ca: ($ca_json | fromjson? // {})
+			ca: ($ca_json | fromjson? // {}),
+			snapshot: {
+				at: { updated_at: ($snap_at_ts | tonumber), interval: 30, available: ($snap_at_available == "1") },
+				cell: { updated_at: ($snap_cell_ts | tonumber), interval: 120, available: ($snap_cell_available == "1") },
+				ca: { updated_at: ($snap_ca_ts | tonumber), interval: ($snap_ca_interval | tonumber), available: ($snap_ca_available == "1") }
+			}
 		}' > "${RU}/state.json.tmp" && mv "${RU}/state.json.tmp" "${RU}/state.json"
+}
+
+# 模组查询独立于 IPv6 恢复分支；单次请求仍经 at_run 串口锁并带超时。
+# 每次尝试都刷新时间戳，失败时清空对应快照，避免把旧值伪装成当前值。
+clear_info_snapshots()
+{
+	SNAP_ATI=""
+	SNAP_CPIN=""
+	SNAP_COPS=""
+	SNAP_CELL="{}"
+	SNAP_CA="{}"
+	SNAP_AT_TS=$(date +%s)
+	SNAP_CELL_TS=$SNAP_AT_TS
+	SNAP_CA_TS=$SNAP_AT_TS
+	LAST_SNAP=0
+	LAST_CELL=0
+	LAST_CA=0
+	SNAP_SERIAL_READY=0
+	LAST_SERIAL_PROBE=0
+}
+
+refresh_snapshots()
+{
+	local now="$1" define="$2" port="$D_AT_PORT" response
+	[ -n "$port" ] && [ -e "$port" ] || return 1
+	[ "$now" -ge "${SERIAL_PAUSE_UNTIL:-0}" ] || return 1
+	if [ "${SNAP_SERIAL_READY:-0}" != "1" ]; then
+		[ "$((now - LAST_SERIAL_PROBE))" -ge 15 ] || return 1
+		LAST_SERIAL_PROBE=$now
+		if response=$(at_run "$port" "ATI" 3 2>/dev/null) && at_response_valid "ATI" "$response"; then
+			SNAP_SERIAL_READY=1
+			SNAP_ATI=$(printf '%s' "$response" | tr -d '\r')
+			if response=$(at_run "$port" "AT+CPIN?" 3 2>/dev/null) && at_response_valid "AT+CPIN?" "$response"; then SNAP_CPIN=$(printf '%s' "$response" | tr -d '\r'); else SNAP_CPIN=""; fi
+			if response=$(at_run "$port" "AT+COPS?" 3 2>/dev/null) && at_response_valid "AT+COPS?" "$response"; then SNAP_COPS=$(printf '%s' "$response" | tr -d '\r'); else SNAP_COPS=""; fi
+			SNAP_AT_TS=$now
+			LAST_SNAP=$now
+		else
+			SNAP_SERIAL_READY=0
+			SNAP_ATI=""; SNAP_CPIN=""; SNAP_COPS=""
+			SNAP_CELL="{}"; SNAP_CA="{}"
+			SNAP_AT_TS=$now; SNAP_CELL_TS=$now; SNAP_CA_TS=$now
+			LAST_SNAP=$now; LAST_CELL=$now; LAST_CA=$now
+			return 1
+		fi
+	fi
+	if [ "$((now - LAST_SNAP))" -ge 30 ]; then
+		if response=$(at_run "$port" "ATI" 3 2>/dev/null) && at_response_valid "ATI" "$response"; then
+			SNAP_ATI=$(printf '%s' "$response" | tr -d '\r')
+		else
+			SNAP_ATI=""; SNAP_CPIN=""; SNAP_COPS=""
+			SNAP_CELL="{}"; SNAP_CA="{}"
+			SNAP_SERIAL_READY=0
+			LAST_SERIAL_PROBE=$now
+			SNAP_AT_TS=$now; SNAP_CELL_TS=$now; SNAP_CA_TS=$now
+			LAST_SNAP=$now; LAST_CELL=$now; LAST_CA=$now
+			return 1
+		fi
+		if response=$(at_run "$port" "AT+CPIN?" 3 2>/dev/null) && at_response_valid "AT+CPIN?" "$response"; then SNAP_CPIN=$(printf '%s' "$response" | tr -d '\r'); else SNAP_CPIN=""; fi
+		if response=$(at_run "$port" "AT+COPS?" 3 2>/dev/null) && at_response_valid "AT+COPS?" "$response"; then SNAP_COPS=$(printf '%s' "$response" | tr -d '\r'); else SNAP_COPS=""; fi
+		SNAP_AT_TS=$now
+		LAST_SNAP=$now
+	fi
+	if [ "$((now - LAST_CELL))" -ge 120 ]; then
+		SNAP_CELL="{}"
+		CL_MCC=""; CL_RSRP=""; CL_RAW=""; SS_RSRP=""; SS_RSRQ=""; SS_SINR=""
+		if fibocom_cellinfo "$port" "$define" >/dev/null 2>&1; then
+			# SS-RSRP/SS-RSRQ/SS-SINR 来自 3GPP 标准 AT+CESQ 扩展位。
+			fibocom_cesq "$port" >/dev/null 2>&1 || :
+		fi
+		if [ -n "$CL_MCC$CL_RSRP$SS_SINR$CL_RAW" ]; then
+			SNAP_CELL=$(jq -n --arg rat "$CL_RAT" --arg netmode "$CL_NETMODE" --arg mcc "$CL_MCC" \
+				--arg mnc "$CL_MNC" --arg tac "$CL_TAC" --arg cellid "$CL_CELLID" --arg band "$CL_BAND" \
+				--arg bw "$CL_BW" --arg rsrp "$CL_RSRP" --arg rsrq "$CL_RSRQ" --arg sinr "$SS_SINR" \
+				--arg ss_rsrp "$SS_RSRP" --arg ss_rsrq "$SS_RSRQ" --arg ss_sinr "$SS_SINR" \
+				--arg raw "$CL_RAW" --arg model "$CL_MODEL" \
+				'{rat:$rat,netmode:$netmode,mcc:$mcc,mnc:$mnc,tac:$tac,cellid:$cellid,band:$band,bw:$bw,rsrp:$rsrp,rsrq:$rsrq,sinr:$sinr,ss_rsrp:$ss_rsrp,ss_rsrq:$ss_rsrq,ss_sinr:$ss_sinr,raw:$raw,model:$model}' 2>/dev/null)
+			[ -n "$SNAP_CELL" ] || SNAP_CELL="{}"
+		fi
+		SNAP_CELL_TS=$now
+		LAST_CELL=$now
+	fi
+	if [ "$(fcfg watch ca_check_enabled)" = "1" ] && [ "$((now - LAST_CA))" -ge "$(fcfg watch ca_interval)" ]; then
+		SNAP_CA="{}"
+		fibocom_cainfo "$port" && SNAP_CA="$CA_JSON"
+		[ -n "$SNAP_CA" ] || SNAP_CA="{}"
+		SNAP_CA_TS=$now
+		LAST_CA=$now
+	fi
+}
+
+# profile.enable 的 UCI 变更与 RPC 指令共用同一状态转换；停用时只断开一次。
+sync_profile_enable()
+{
+	local current="$1" previous="$PROFILE_ENABLED_LAST" allow_attempt="${2:-1}" now
+	if [ "$previous" = "1" ] && [ "$current" != "1" ]; then
+		event "拨号已停用（profile.enable=0）"
+		PROFILE_DISABLE_PENDING=1
+		PROFILE_DISABLE_FAILED=0
+		LAST_DISABLE_ATTEMPT=0
+		LAST_DISABLE_LOG=0
+	elif [ "$previous" != "1" ] && [ "$current" = "1" ]; then
+		event "拨号已启用"
+		PROFILE_DISABLE_PENDING=0
+		PROFILE_DISABLE_FAILED=0
+		LAST_DISABLE_ATTEMPT=0
+	fi
+	PROFILE_ENABLED_LAST="$current"
+	[ "$allow_attempt" = "1" ] || return 0
+	if [ "$current" != "1" ] && [ "$PROFILE_DISABLE_PENDING" = "1" ] \
+		&& [ -n "$D_AT_PORT" ] && [ -e "$D_AT_PORT" ]; then
+		now=$(date +%s)
+		[ "$((now - LAST_DISABLE_ATTEMPT))" -ge "$PROFILE_DISABLE_RETRY_INTERVAL" ] || return 0
+		LAST_DISABLE_ATTEMPT=$now
+		if dial_stop "$D_AT_PORT"; then
+			PROFILE_DISABLE_PENDING=0
+			PROFILE_DISABLE_FAILED=0
+			LAST_DISABLE_LOG=0
+			event "停用拨号：PDP 已断开"
+		else
+			PROFILE_DISABLE_FAILED=1
+			if [ "$LAST_DISABLE_LOG" = "0" ] || [ "$((now - LAST_DISABLE_LOG))" -ge "$PROFILE_DISABLE_LOG_INTERVAL" ]; then
+				event "停用拨号：断开失败，将在 ${PROFILE_DISABLE_RETRY_INTERVAL}s 后重试（${DIAL_STOP_REASON:-AT 响应无效}）"
+				LAST_DISABLE_LOG=$now
+			fi
+		fi
+	fi
+}
+
+# 自动与手动拨号共用尝试/成功计时：失败只节流下一次尝试，不刷新会话宽限期。
+dial_attempt()
+{
+	local port="$1" now="${2:-$(date +%s)}"
+	LAST_DIAL=$now
+	dial_now "$port" || return 1
+	mark_session_success
+	return 0
 }
 
 # 单槽邮箱：写入与领取共享锁，未消费时明确返回 busy，不覆盖请求。
@@ -178,6 +353,14 @@ handle_req()
 				event "UI 指令未执行: $req（管理器停用或设备缺席）"
 				return 0
 			fi
+			case "$req" in
+				reconnect|modem_restart)
+					if [ "$(fcfg profile enable)" != "1" ]; then
+						event "UI 指令未执行: $req（拨号已停用）"
+						return 0
+					fi
+				;;
+			esac
 		;;
 	esac
 	case "$req" in
@@ -190,22 +373,24 @@ handle_req()
 			uci set fm350.profile.enable=0
 			uci commit fm350
 			event "UI 指令: 停用拨号"
-			[ -n "$port" ] && [ -e "$port" ] && dial_stop "$port"
 		;;
 		"reconnect")
 			event "UI 指令: 重新拨号"
-			[ -n "$port" ] && {
-				dial_now "$port"
-				LAST_DIAL=$(date +%s)
-			}
+			if [ -n "$port" ] && [ -e "$port" ]; then
+				if ! dial_attempt "$port"; then
+					event "UI 重拨失败：AT 命令未成功"
+				fi
+			fi
 		;;
 		"modem_restart")
 			event "UI 指令: 软重启模组"
-			[ -n "$port" ] && action_modem_restart "$port"
+			if [ -n "$port" ] && ! action_modem_restart "$port"; then
+				event "UI 软重启失败：AT 命令未成功"
+			fi
 		;;
 		"usb_reset")
 			event "UI 指令: USB 硬件复位"
-			action_usb_reset "$D_USB_PATH" "$D_DEVNODE"
+			action_usb_reset "$D_USB_PATH" "$D_DEVNODE" || event "UI USB 硬件复位失败"
 		;;
 		"ifup")
 			event "UI 指令: 重建网络接口"
@@ -223,6 +408,8 @@ cycle()
 	now=$(date +%s)
 	load_config
 	handle_req && load_config
+	# 先同步用户意图；管理器关闭或设备缺席时只保留待处理状态，不访问串口。
+	sync_profile_enable "$(fcfg profile enable)" 0
 	if [ "$(fcfg global enabled)" != "1" ]; then
 		recover_done
 		LAST_COUNTER_TS=0
@@ -231,8 +418,12 @@ cycle()
 	fi
 
 	# 发现
-	discover_light
+	if ! discover_light; then
+		# discover_auto 处于扫描冷却时返回失败；失效缓存已由 discover_light 清理。
+		D_USB_PATH=""
+	fi
 	if [ -z "$D_USB_PATH" ]; then
+		clear_info_snapshots
 		if [ "$ABSENT_SINCE" = "0" ]; then
 			ABSENT_SINCE=$now
 			event "模块离线（USB 不可见）"
@@ -264,6 +455,11 @@ cycle()
 		[ -n "$old" ] && [ "$old" != "$D_USB_PATH" ] && event "模块位置变更: ${old} → ${D_USB_PATH}"
 		D_IFNAME=""
 		D_AT_PORT=""
+		R_PROBLEM=""
+		R_SINCE=0
+		R_LEVEL=0
+		: > "${RU}/at_probe.last"
+		clear_info_snapshots
 	fi
 	if [ -n "$D_VID" ] && [ "$D_VID:$D_PID" != "$LAST_VID:$LAST_PID" ]; then
 		LAST_VID="$D_VID"
@@ -276,25 +472,35 @@ cycle()
 	[ -n "$D_AT_PORT" ] && [ ! -e "$D_AT_PORT" ] && D_AT_PORT=""
 	[ -z "$D_IFNAME" ] && discover_ifname
 	[ -z "$D_AT_PORT" ] && discover_at_port "$(fcfg global at_port)"
+	sync_profile_enable "$(fcfg profile enable)"
 
 	# 总开关 / 基础设施
 	if [ "$(fcfg profile enable)" != "1" ]; then
-		if [ "$R_PROBLEM" != "disabled" ]; then
-			event "拨号已停用（profile.enable=0）"
-			R_PROBLEM="disabled"
-		fi
+		R_PROBLEM="disabled"
 		write_state
 		return 0
 	fi
 	if [ "$R_PROBLEM" = "disabled" ]; then
 		R_PROBLEM=""
-		event "拨号已启用"
 	fi
 	if [ -z "$D_IFNAME" ] || [ -z "$D_AT_PORT" ]; then
 		write_state
 		return 0
 	fi
-	dial_ensure_interfaces "$D_IFNAME"
+	if ! dial_ensure_interfaces "$D_IFNAME"; then
+		if [ "$R_PROBLEM" != "config" ]; then
+			event "网络接口配置失败，暂停拨号、地址刷新与自动恢复；请检查接口名称和归属"
+			R_SINCE=$now
+		fi
+		R_PROBLEM="config"
+		R_LEVEL=0
+		write_state
+		return 0
+	fi
+	if [ "$R_PROBLEM" = "config" ]; then
+		event "网络接口配置已恢复，继续管理"
+		recover_done
+	fi
 
 	# 计数器采样（供 UI 展示，同时供假死判定；每轮只采样一次）
 	probe_counters "$D_IFNAME"
@@ -312,9 +518,9 @@ cycle()
 		fi
 		if [ $((now - LAST_DIAL)) -ge 60 ] && [ "$R_LEVEL" -le 1 ]; then
 			event "重拨（AT+CGACT=1,${define}）"
-			dial_now "$D_AT_PORT"
-			LAST_DIAL=$now
-			SESS_SINCE=$now
+			if ! dial_attempt "$D_AT_PORT" "$now"; then
+				event "自动重拨失败：AT 命令未成功"
+			fi
 		fi
 		escalate_v4 "$now"
 		write_state
@@ -339,7 +545,6 @@ cycle()
 			if frozen_elapsed "$now" "$sum" && auto_usb_reset "$now"; then
 				event "数据面假死（计数无变化且 $(fcfg watch ipv4_ping_target) 不可达 ≥$(fcfg watch frozen_sample)s），执行 USB 复位"
 				COUNTER_SUM=0
-				SESS_SINCE=$now
 				R_PROBLEM="data"
 				R_SINCE=$now
 				R_LEVEL=4
@@ -371,6 +576,8 @@ cycle()
 		if [ -z "$K_V6_ADDR" ] || [ "$K_V6_ROUTE" != "1" ]; then
 			V6_PING_FAILS=0
 			escalate_v6 "$now" 1
+			# 整体升级不再永久屏蔽快照；recover.sh 的串口暂停窗口与 ATI 探针决定何时恢复。
+			if [ "$R_PROBLEM" = "v6" ]; then refresh_snapshots "$now" "$define"; fi
 			write_state
 			return 0
 		else
@@ -397,33 +604,9 @@ cycle()
 
 	[ "$(fcfg watch ipv6_check_enabled)" != "1" ] && [ "$R_PROBLEM" = "v6" ] && recover_done
 
-	# 模组信息快照（30s AT / 120s 小区，UI 只读快照）
-	if [ -n "$D_AT_PORT" ] && { [ -z "$R_PROBLEM" ] || [ "$R_PROBLEM" = "v6" ]; }; then
-		if [ "$((now - LAST_SNAP))" -ge 30 ]; then
-			SNAP_ATI=$(at_run "$D_AT_PORT" "ATI" 3)
-			SNAP_CPIN=$(at_run "$D_AT_PORT" "AT+CPIN?" 3)
-			SNAP_COPS=$(at_run "$D_AT_PORT" "AT+COPS?" 3)
-			LAST_SNAP=$now
-		fi
-		if [ "$((now - LAST_CELL))" -ge 120 ]; then
-			fibocom_cellinfo "$D_AT_PORT" "$define" >/dev/null 2>&1
-			# SS-RSRP/SS-RSRQ/SS-SINR 取自 3GPP 标准 AT+CESQ 扩展位，解析在厂商模块
-			fibocom_cesq "$D_AT_PORT"
-			if [ -n "$CL_MCC" ] || [ -n "$CL_RSRP" ] || [ -n "$SS_SINR" ]; then
-				SNAP_CELL=$(jq -n --arg rat "$CL_RAT" --arg netmode "$CL_NETMODE" --arg mcc "$CL_MCC" \
-					--arg mnc "$CL_MNC" --arg tac "$CL_TAC" --arg cellid "$CL_CELLID" --arg band "$CL_BAND" \
-					--arg bw "$CL_BW" --arg rsrp "$CL_RSRP" --arg rsrq "$CL_RSRQ" --arg sinr "$SS_SINR" \
-					--arg ss_rsrp "$SS_RSRP" --arg ss_rsrq "$SS_RSRQ" --arg ss_sinr "$SS_SINR" \
-					--arg raw "$CL_RAW" --arg model "$CL_MODEL" \
-					'{rat:$rat,netmode:$netmode,mcc:$mcc,mnc:$mnc,tac:$tac,cellid:$cellid,band:$band,bw:$bw,rsrp:$rsrp,rsrq:$rsrq,sinr:$sinr,ss_rsrp:$ss_rsrp,ss_rsrq:$ss_rsrq,ss_sinr:$ss_sinr,raw:$raw,model:$model}' 2>/dev/null)
-			fi
-			LAST_CELL=$now
-		fi
-		# 载波聚合快照（固件未提供 CA 使能命令，此项仅监控查询，解析在厂商模块）
-		if [ "$(fcfg watch ca_check_enabled)" = "1" ] && [ "$((now - LAST_CA))" -ge "$(fcfg watch ca_interval)" ]; then
-			fibocom_cainfo "$D_AT_PORT" && SNAP_CA="$CA_JSON"
-			LAST_CA=$now
-		fi
+	# 模组信息快照与恢复提前返回解耦（30s AT / 120s 小区 / ca_interval CA）。
+	if [ -z "$R_PROBLEM" ] || [ "$R_PROBLEM" = "v6" ]; then
+		refresh_snapshots "$now" "$define"
 	fi
 
 	# 完全正常

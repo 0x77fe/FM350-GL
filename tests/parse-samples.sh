@@ -5,6 +5,10 @@
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 LIB="$ROOT/luci-app-fm350/files/usr/lib/fm350"
+RU="${TMPDIR:-/tmp}/fm350-parse-$$"
+mkdir -p "$RU"
+
+. "$LIB/lib/at.sh"
 
 S_ATI=""
 S_CCINFO=""
@@ -98,7 +102,8 @@ assert_eq "$SS_RSRQ" -11.0 cesq-ss-rsrq
 assert_eq "$SS_SINR" 16.8 cesq-ss-sinr
 
 # CESQ 无效位（255）留空
-S_CESQ="+CESQ: 99,99,255,255,54,60,255,255,255"
+S_CESQ="+CESQ: 99,99,255,255,54,60,255,255,255
+OK"
 fibocom_cesq /dev/mock >/dev/null
 assert_empty "$SS_RSRP" cesq-invalid-rsrp
 assert_empty "$SS_RSRQ" cesq-invalid-rsrq
@@ -129,12 +134,13 @@ if command -v jq >/dev/null 2>&1; then
 
 	# 未激活的辅载波不计入聚合
 	S_CAINFO="PCC: 78,10,630000,-92
-SCC: 1,1,5078,11,640000,0,0,-90"
+SCC: 1,1,5078,11,640000,0,0,-90
+OK"
 	fibocom_cainfo /dev/mock >/dev/null
 	assert_eq "$(printf '%s' "$CA_JSON" | jq -r .aggregated)" false ca-inactive-aggregated
 	assert_eq "$(printf '%s' "$CA_JSON" | jq -r .scc_active)" 0 ca-inactive-scc-active
 
-	# 无 PCC 行：CA_JSON 留空，由调用方保留上次快照
+	# 无 PCC 行：CA_JSON 留空，调用方标记本轮快照不可用
 	S_CAINFO="AT+GTCAINFO?
 OK"
 	if fibocom_cainfo /dev/mock; then
@@ -145,5 +151,32 @@ OK"
 else
 	echo "SKIP carrier aggregation samples (jq not found)"
 fi
+
+# 完整 ERROR 行优先于同一响应里的 OK；错误查询不能留下可用解析值。
+S_CCINFO="+GTCCINFO: LTE service cell:
+0,0,460,01,1a2b,1234567,1650,10,103,100,10,30,46,18
+ERROR
+OK"
+if fibocom_cellinfo /dev/mock 3 >/dev/null; then
+	echo "FAIL cellinfo-error-plus-ok: query reported success" >&2
+	exit 1
+fi
+assert_empty "$CL_RAW" cellinfo-error-clears-raw
+S_CESQ="+CESQ: 99,99,255,255,54,60,64,61,80
++CME ERROR: 10
+OK"
+if fibocom_cesq /dev/mock >/dev/null; then
+	echo "FAIL cesq-error-plus-ok: query reported success" >&2
+	exit 1
+fi
+assert_empty "$SS_SINR" cesq-error-clears-values
+S_CAINFO="PCC: 78,10,630000,-92
+ERROR
+OK"
+if fibocom_cainfo /dev/mock >/dev/null; then
+	echo "FAIL cainfo-error-plus-ok: query reported success" >&2
+	exit 1
+fi
+assert_empty "$CA_JSON" cainfo-error-clears-json
 
 echo "PASS parse-samples"

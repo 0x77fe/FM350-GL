@@ -11,9 +11,13 @@
 # fibocom_dns_v4 <port> <define_connect> <1|2>：输出运营商 IPv4 DNS（兜底公共DNS）
 fibocom_dns_v4()
 {
-	local port="$1" define="$2" idx="$3" resp d1 d2
+	local port="$1" define="$2" idx="$3" raw resp d1 d2
 	[ -z "$define" ] && define="1"
-	resp=$(at_run "$port" "AT+GTDNS=${define}" | grep "+GTDNS: " | grep -E '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | sed -n '1p')
+	if raw=$(at_run "$port" "AT+GTDNS=${define}") && at_response_valid "AT+GTDNS=${define}" "$raw"; then
+		resp=$(printf '%s\n' "$raw" | grep "+GTDNS: " | grep -E '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | sed -n '1p')
+	else
+		resp=""
+	fi
 	d1=$(echo "$resp" | awk -F'"' '{print $2}' | awk -F, '{print $1}')
 	d2=$(echo "$resp" | awk -F'"' '{print $4}' | awk -F, '{print $1}')
 	[ -z "$d1" ] && d1="223.5.5.5"
@@ -113,12 +117,14 @@ fibocom_get_rsrq()
 # 输出全局：SS_RSRQ SS_RSRP SS_SINR；字段为 255 或整行缺失时对应项留空
 fibocom_cesq()
 {
-	local line c7 c8 c9
+	local line c7 c8 c9 response
 
 	SS_RSRQ=""
 	SS_RSRP=""
 	SS_SINR=""
-	line=$(at_run "$1" "AT+CESQ" 4 | grep "^+CESQ:" | head -1)
+	response=$(at_run "$1" "AT+CESQ" 4) || return 1
+	at_response_valid "AT+CESQ" "$response" || return 1
+	line=$(printf '%s\n' "$response" | grep "^+CESQ:" | head -1)
 	[ -n "$line" ] || return 1
 	c7=$(echo "$line" | cut -d, -f7)
 	c8=$(echo "$line" | cut -d, -f8)
@@ -130,14 +136,15 @@ fibocom_cesq()
 }
 
 # fibocom_cainfo <port>：解析 AT+GTCAINFO?
-# 输出全局：CA_JSON（含原始回显）；读不到 PCC 行时 CA_JSON 留空，由调用方保留上次快照
+# 输出全局：CA_JSON（含原始回显）；读不到 PCC 行时返回失败，调用方清除不可用快照
 fibocom_cainfo()
 {
 	local raw pcc_line band_num pci arfcn rsrp band scc_line scc_body state
 	local scc_band_num scc_band scc_pci scc_arfcn scc_rsrp active json total
 
 	CA_JSON=""
-	raw=$(at_run "$1" "AT+GTCAINFO?" 6)
+	raw=$(at_run "$1" "AT+GTCAINFO?" 6) || return 1
+	at_response_valid "AT+GTCAINFO?" "$raw" || return 1
 	[ -n "$raw" ] || return 1
 	# 行内字段以冒号后的空格分隔，先去掉空白再切字段
 	pcc_line=$(echo "$raw" | grep "^PCC:" | head -1 | cut -d: -f2- | tr -d ' \r')
@@ -201,15 +208,23 @@ fibocom_cellinfo()
 	CL_SINR=""
 	CL_RAW=""
 
-	CL_MODEL=$(at_run "$port" "ATI" 4 | grep -i -E "FM350" | head -1 | tr -d '\r')
+	if model=$(at_run "$port" "ATI" 4 2>/dev/null) && at_response_valid "ATI" "$model"; then
+		CL_MODEL=$(printf '%s\n' "$model" | grep -i -E "FM350" | head -1 | tr -d '\r')
+	fi
 
-	response=$(at_run "$port" "AT+GTCCINFO?" 6)
+	response=$(at_run "$port" "AT+GTCCINFO?" 6) || return 1
+	if ! at_response_valid "AT+GTCCINFO?" "$response"; then
+		CL_RAW=""
+		return 1
+	fi
 	CL_RAW="$response"
 
 	# 联发科平台：GTCCINFO 无 "service" 行时退回 COPS? 取 RAT
 	rat=$(echo "$response" | grep "service" | awk '{print $1}' | sed 's/:/ /g' | awk '{print $1}')
 	[ -z "$rat" ] && {
-		rat_num=$(at_run "$port" "AT+COPS?" 4 | grep "+COPS:" | awk -F, '{print $4}' | sed 's/\r//g')
+		if rat2=$(at_run "$port" "AT+COPS?" 4) && at_response_valid "AT+COPS?" "$rat2"; then
+			rat_num=$(printf '%s\n' "$rat2" | grep "+COPS:" | awk -F, '{print $4}' | sed 's/\r//g')
+		fi
 		rat=$(fibocom_get_rat "$rat_num")
 	}
 	CL_RAT="$rat"

@@ -66,5 +66,12 @@ while IFS= read -r f; do
 		printf '  DIFF  %s\n' "$rel"; bad=$((bad+1))
 	fi
 done < "$VERIFY_DIR/expected"
+# Makefile installs the UCI source a second time as the immutable default template.
+n=$((n+1))
+if cmp -s "$ROOT/luci-app-fm350/files/etc/config/fm350" "$FAKEROOT/usr/share/fm350/config.template"; then
+	printf '  OK    /usr/share/fm350/config.template\n'
+else
+	printf '  DIFF  /usr/share/fm350/config.template\n'; bad=$((bad+1))
+fi
 echo "== 共 $n 个文件，不一致 $bad 个 =="
 [ "$n" -gt 0 ] && [ "$bad" -eq 0 ] || exit 1

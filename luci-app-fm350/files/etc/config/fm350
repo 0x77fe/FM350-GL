@@ -12,6 +12,9 @@ config fm350 'global'
 	option v4_ifname 'wwan_5g_0'
 	option v6_ifname 'wwan6_5g_0'
 	option v6_alias '1'
+	# 由守护记录其创建/接管的接口，用于改名后安全清理旧接口；不要手动编辑。
+	option managed_v4_ifname ''
+	option managed_v6_ifname ''
 
 config fm350 'watch'
 	option wait_timeout '180'

@@ -8,6 +8,7 @@
 #   · global / watch / notify 下各项每轮重新读取，改动下一轮生效；
 #   · profile.apn / profile.pdp_type / profile.define_connect 在下次拨号（dial_now）时生效；
 #   · global.v4_ifname / global.v6_ifname / global.v6_alias 改动会重建 netifd 接口；
+#   · global.managed_v4_ifname / managed_v6_ifname 是守护维护的持久接口归属记录，不在 UI 编辑；
 #   · watch.frozen_enabled / ipv6_check_enabled / ca_check_enabled 立即改变检测行为。
 
 DFLT_ENABLED="1"
@@ -142,6 +143,15 @@ cfg_ifname()
 	esac
 }
 
+# cfg_owned_ifname <值>：持久归属记录缺失或非法时返回空，不猜测旧接口名。
+cfg_owned_ifname()
+{
+	case "$1" in
+		''|*[!A-Za-z0-9._-]*) echo "" ;;
+		*) if [ ${#1} -le 15 ]; then echo "$1"; else echo ""; fi ;;
+	esac
+}
+
 # cfg_dev <值> <默认值>：设备路径与 USB 路径提示
 cfg_dev()
 {
@@ -194,6 +204,7 @@ fcfg()
 		global.usb_path_hint) cfg_dev "$v" "$DFLT_USB_PATH_HINT" ;;
 		global.v4_ifname) cfg_ifname "$v" "$DFLT_V4_IFNAME" ;;
 		global.v6_ifname) cfg_ifname "$v" "$DFLT_V6_IFNAME" ;;
+		global.managed_v4_ifname|global.managed_v6_ifname) cfg_owned_ifname "$v" ;;
 		global.v6_alias) cfg_bool "$v" "$DFLT_V6_ALIAS" ;;
 		watch.wait_timeout) cfg_num "$v" "$DFLT_WAIT_TIMEOUT" 30 86400 ;;
 		watch.recovery_timeout) cfg_num "$v" "$DFLT_RECOVERY_TIMEOUT" 30 86400 ;;
