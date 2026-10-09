@@ -1,0 +1,135 @@
+// FM350-GL 管理后端（rpcd ucode）
+// 参数声明与读取遵照 rpcd ucode 规范：args 声明 schema（字符串字面量=string，0=number），
+// 参数经 request.args.<name> 读取（参照 /usr/share/rpcd/ucode/luci 的 setInitAction 等）
+'use strict';
+
+import { readfile, popen } from 'fs';
+
+const STATE_FILE = '/var/run/fm350/state.json';
+const SH = '/usr/lib/fm350/fm350.sh';
+
+function sh(cmd) {
+	const fd = popen(cmd + ' 2>&1');
+	if (!fd)
+		return '';
+	const out = fd.read('all');
+	fd.close();
+	return out;
+}
+
+// shell 单引号转义
+function q(s) {
+	return "'" + replace(s, "'", "'\\''") + "'";
+}
+
+function readState() {
+	const f = readfile(STATE_FILE);
+	return f ? json(f) : {};
+}
+
+function readEvents(count) {
+	const f = readfile('/var/run/fm350/events.log');
+	if (!f)
+		return [];
+	const rows = split(trim(f), '\n');
+	const start = length(rows) > count ? length(rows) - count : 0;
+	// 正序返回（旧→新），与运行日志一致
+	const out = [];
+	for (let i = start; i < length(rows); i++)
+		push(out, rows[i]);
+	return out;
+}
+
+// 参数统一入口：兼容 request.args 与直传对象
+function argsOf(request) {
+	const r = request || {};
+	return r.args || r;
+}
+
+const methods = {};
+
+methods.status = {
+	args: { quick: 0 },
+	call: function(request) {
+		const st = readState();
+		return { state: st, at: st.at || {} };
+	}
+};
+
+methods.cell = {
+	call: function(request) {
+		const st = readState();
+		return { cell: st.cell || {} };
+	}
+};
+
+methods.at_exec = {
+	args: { cmd: 'cmd' },
+	call: function(request) {
+		const p = argsOf(request);
+		const cmd = p.cmd || '';
+		if (length(cmd) > 256 || !match(cmd, /^[\x20-\x7e]+$/))
+			return { error: '非法 AT 命令' };
+		const st = readState();
+		const port = st.net && st.net.at_port ? st.net.at_port : '';
+		if (!port)
+			return { error: 'AT 端口未就绪' };
+		const resp = sh(SH + ' at_cli ' + q(port) + ' ' + q(cmd) + ' 15');
+		return { resp: resp };
+	}
+};
+
+methods.dial_op = {
+	args: { action: 'action' },
+	call: function(request) {
+		const p = argsOf(request);
+		const action = p.action || '';
+		const ok = [ 'enable', 'disable', 'reconnect', 'modem_restart', 'usb_reset', 'ifup' ];
+		let found = false;
+		for (let i = 0; i < length(ok); i++)
+			if (ok[i] == action)
+				found = true;
+		if (!found)
+			return { error: '未知操作' };
+		const out = trim(sh(SH + ' enqueue ' + q(action)));
+		if (out == 'queued')
+			return { queued: true, action: action };
+		return { error: out == 'busy' ? '已有待处理指令，请稍后重试' : '无法提交指令' };
+	}
+};
+
+methods.events = {
+	args: { lines: 0 },
+	call: function(request) {
+		const p = argsOf(request);
+		return { events: readEvents(p.lines || 30) };
+	}
+};
+
+methods.events_clear = {
+	call: function(request) {
+		// 清空事件文件（禁 rm 规范下用截断）；守护后续事件会重新累积
+		const out = sh(': > /var/run/fm350/events.log');
+		return { ok: !length(out), out: out };
+	}
+};
+
+methods.logs = {
+	args: { lines: 0 },
+	call: function(request) {
+		const p = argsOf(request);
+		const n = p.lines || 50;
+		// logread -e 内建过滤，避免全量 grep 触发 rpc 超时/中断
+		const out = sh('logread -e \'fm350\' 2>/dev/null | tail -n ' + n);
+		return { logs: out };
+	}
+};
+
+methods.probe = {
+	call: function(request) {
+		const out = sh(SH + ' check');
+		return { out: out };
+	}
+};
+
+return { fm350: methods };

@@ -1,0 +1,45 @@
+# 入库范围：源码、构建与部署脚本、离线安装说明与文档；
+# 第三方参考件、草稿、可重建产物、本机环境不入库。
+
+# 参考代码（第三方，GPL）：luci-app-modem 机型库与厂商脚本快照、旧链路配置备份
+/baseline/
+
+# 草稿与临时目录
+/.tmp/
+
+# 本机计划文件（记录构建机/测试机地址与轮次进度，不入库）
+/next.md
+
+# 抓依赖脚本的中间目录
+/dist/deps-apk/.fetch-tmp/
+
+# 二进制包不入库：离线包目录只保留脚本、清单与说明，包由 download.sh 取回或 build/ 产出
+/dist/deps-apk/*.apk
+/dist/deps-ipk/*.ipk
+/dist/*.apk
+/dist/*.ipk
+
+# 编辑器与操作系统噪声
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 日志与临时文件
+*.log
+*.bak
+*.orig
+*.rej
+
+# 本机环境文件（构建机地址、SDK 路径、令牌等走环境变量）
+*.env
+*.env.*
+.env
+.env.*
+
+# meow-memory 本地记忆库（本机环境）
+/.dsh-meow/

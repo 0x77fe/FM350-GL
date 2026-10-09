@@ -1,0 +1,145 @@
+#!/bin/sh
+# luci-app-fm350 离线安装 —— ipk 体系（ImmortalWrt / OpenWrt 24.10 及以前，opkg）
+#
+# 目标：ImmortalWrt 24.10.x x86_64（kernel 6.6.122，kmods ABI 6.6.122-1-e7e50fbc0aafa7443418a79928da2602）
+# 用法：先把本目录整包传到路由器，再在路由器上执行本脚本 —— 路由器**不需要联网**
+#       传送前必须先在联网机器上跑 download.sh 或 download.ps1（两者等价），把 17 个依赖与
+#       预编译主包下齐并校验；缺文件或哈希不符时本脚本会在安装前失败。
+#       传输注意：PowerShell 里的 tar 管道会损坏二进制，须先打包再传；scp 必须 -O（dropbear 无 sftp-server）。
+#
+# 目录内容：download.sh / download.ps1（联网下载，二选一）+ 17 个依赖包 + SHA256SUMS
+#           + 主包 luci-app-fm350_*.ipk + APP-SHA256SUMS（主包的发布锚点）
+#   · 仓库不含二进制：第三方依赖由下载脚本按 SHA256SUMS 从官方镜像取得并校验，
+#     主包（本项目自建）由下载脚本按 APP-SHA256SUMS 从 GitHub Release 取回并校验
+set -e
+
+DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+cd "$DIR"
+
+# 固件版本、目标架构与内核版本只来自 META，不再在各脚本里各写一份
+[ -f META ] || { echo "缺少 META（固件版本与内核版本），请与下载脚本一起拷贝本目录"; exit 1; }
+. ./META
+KERNEL_VER="${FM350_KERNEL:-}"
+
+# pick_local_app <glob>：本地自编主包按 -r<release> 的数字取最大（仅 FM350_LOCAL_APP 放行路径用）
+pick_local_app()
+{
+	ls -1 $1 2>/dev/null | awk '{ n=$0; sub(/.*-r/, "", n); sub(/[^0-9].*/, "", n); if (n == "") n=0; print n" "$0 }' \
+		| sort -rn | head -1 | cut -d' ' -f2-
+}
+
+echo "[0/6] 预检"
+# 注意 libubox / libubus 在 24.10 是带版本号的包名（libubox20240329、libubus20250102），
+# 所以按前缀匹配，不能按固定名查
+miss=""
+for p in luci-base rpcd; do
+	opkg list-installed 2>/dev/null | grep -q "^${p} " || miss="$miss $p"
+done
+for p in libubox libubus; do
+	opkg list-installed 2>/dev/null | grep -q "^${p}" || miss="$miss $p"
+done
+if [ -n "$miss" ]; then
+	echo "  !! 固件缺少：$miss"
+	echo "     本目录不含这些基础包（正常 24.10 镜像自带），需联网补装后重试"
+	exit 1
+fi
+
+kern=$(uname -r)
+echo "  固件 kernel: $kern（本目录 ABI: ${FM350_ABI:-未知}）"
+case "$kern" in
+	"$KERNEL_VER"*) echo "  内核版本与本目录 kmod 匹配 ✓" ;;
+	*)
+		echo "  !! 内核不匹配：本目录 kmod 是 ${KERNEL_VER}-r1"
+		echo "     换固件版本后需重新抓离线包（kmod 必须与固件内核 ABI 完全一致）"
+		exit 1
+		;;
+esac
+
+echo "[1/6] 校验包完整性（SHA256SUMS）"
+DEP_LIST=""
+if [ -f SHA256SUMS ]; then
+	n=$(wc -l < SHA256SUMS)
+	sha256sum -c SHA256SUMS >/dev/null && echo "  $n 个依赖校验通过 ✓" || {
+		echo "  !! 校验失败（缺包或内容不符）：请在联网的 Windows/Linux 机器上先跑本目录的下载脚本（download.sh / download.ps1），再重新传过来"
+		sha256sum -c SHA256SUMS | grep -v OK
+		exit 1
+	}
+	# 安装文件只取清单里列出且已校验通过的那些，不用通配符
+	while read -r _want _file; do
+		[ -n "$_file" ] || continue
+		DEP_LIST="$DEP_LIST ./${_file#./}"
+	done < SHA256SUMS
+else
+	echo "  (无 SHA256SUMS，跳过)"
+fi
+
+# 主包：按 APP-SHA256SUMS 里的确切文件名与 sha256 校验（防旧版本 / 截断 / 被替换）
+# 本地自编包（build/build-ipk.sh）用于测试时，用 FM350_LOCAL_APP=1 显式放行
+APP=""
+if [ -f APP-SHA256SUMS ]; then
+	read -r app_want app_name < APP-SHA256SUMS
+	app_name="${app_name#./}"
+	if [ -n "$app_name" ] && [ -f "./$app_name" ] \
+		&& [ "$(sha256sum "./$app_name" | cut -d' ' -f1)" = "$app_want" ]; then
+		APP="./$app_name"
+		echo "  主包校验通过 ✓ $app_name"
+	elif [ -n "$FM350_LOCAL_APP" ]; then
+		APP=$(pick_local_app './luci-app-fm350_*.ipk')
+		[ -n "$APP" ] && echo "  !! 跳过发布哈希校验（FM350_LOCAL_APP=1，本地自编包）：$APP"
+	fi
+else
+	echo "  (无 APP-SHA256SUMS)"
+	if [ -n "$FM350_LOCAL_APP" ]; then
+		APP=$(pick_local_app './luci-app-fm350_*.ipk')
+	fi
+fi
+
+[ -n "$APP" ] || {
+	echo "  !! 主包缺失或与 APP-SHA256SUMS 不符（期望 ${app_name:-未知}）"
+	echo "     ① 回联网的 Windows/Linux 机器跑本目录的下载脚本，按发布清单取回主包；"
+	echo "     ② 本地自编包测试时用 FM350_LOCAL_APP=1 显式放行（跳过发布哈希校验）"
+	sha256sum -c APP-SHA256SUMS 2>&1 | grep -v OK
+	exit 1
+}
+
+echo "[2/6] 安装依赖包（kmod / sms-tool / jq / odhcp6c / odhcpd-ipv6only）"
+if [ -n "$DEP_LIST" ]; then
+	opkg install $DEP_LIST
+else
+	opkg install ./kmod-usb-core_*.ipk ./kmod-usb2_*.ipk ./kmod-usb3_*.ipk \
+		./kmod-usb-ehci_*.ipk ./kmod-usb-ohci_*.ipk ./kmod-usb-xhci-hcd_*.ipk \
+		./kmod-usb-net_*.ipk ./kmod-usb-net-cdc-ether_*.ipk ./kmod-usb-net-rndis_*.ipk \
+		./kmod-usb-acm_*.ipk ./kmod-usb-serial_*.ipk ./kmod-usb-serial-wwan_*.ipk \
+		./kmod-usb-wdm_*.ipk ./sms-tool_*.ipk ./jq_*.ipk ./odhcp6c_*.ipk ./odhcpd-ipv6only_*.ipk
+fi
+
+echo "[3/6] 安装 $APP"
+opkg install "$APP"
+
+echo "[4/6] 重启 rpcd（否则 ubus 对象 fm350 不注册，页面全空）"
+/etc/init.d/rpcd restart
+sleep 2
+
+echo "[5/6] uhttpd 防缓存 + 启用并启动守护"
+uci -q get uhttpd.main.no_cache | grep -q js || { uci set uhttpd.main.no_cache='js'; uci commit uhttpd; }
+/etc/init.d/uhttpd restart >/dev/null 2>&1 || true
+touch /www/luci-static/resources/view/fm350/*.js 2>/dev/null || true
+# stop → 停顿 → start：procd 对 restart 的 stop/start 竞争会产生双实例记录
+/etc/init.d/fm350mgr disable 2>/dev/null || true
+/etc/init.d/fm350mgr stop 2>/dev/null || true
+sleep 2
+/etc/init.d/fm350mgr enable
+/etc/init.d/fm350mgr start
+sleep 8
+
+echo "[6/6] 状态检查"
+opkg list-installed 2>/dev/null | grep -E '^luci-app-fm350' || echo "  !! 未出现在已装列表"
+if ubus list 2>/dev/null | grep -q '^fm350$'; then
+	echo "  ubus 对象 fm350 已注册 ✓"
+else
+	echo "  !! ubus 里没有 fm350（rpcd 未加载后端？）"
+fi
+echo "  守护进程数=$(pgrep -f '[f]m350.sh daemon' | wc -l)"
+jq -r '.state, .net.v4_at, .usb.vid' /var/run/fm350/state.json 2>/dev/null || echo "  (state.json 未生成：logread | grep fm350 查看原因)"
+echo "-------- 完成 --------"
+echo "LuCI: 服务 -> FM350 管理（概览/AT命令/拨号管理/设置/日志）"

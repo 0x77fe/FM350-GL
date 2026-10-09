@@ -1,0 +1,20 @@
+# 本项目在 Linux/OpenWrt 上运行：仓库内一律存 LF，检出也强制 LF。
+#
+# 背景：本机 git 全局 core.autocrlf=true，若不加规则，Windows 上检出的 .sh / 配置
+# 会带 CRLF —— 传到路由器上执行会直接报 `$'\r': not found`，
+# `sha256sum -c SHA256SUMS` 也会因为文件名尾部多一个 \r 全部 FAIL（实测踩过）。
+* text=auto eol=lf
+
+# 二进制产物：不做行尾/文本处理，也不参与 diff
+*.apk   -text -diff
+*.ipk   -text -diff
+*.pem   -text
+
+# 校验清单：必须逐字节保持原样（任何转换都会让 sha256sum -c 失效）
+SHA256SUMS -text
+
+# 注意：dist/deps-*/download.ps1 是 Windows PowerShell 脚本，**必须保留 UTF-8 BOM**——
+# PowerShell 5.1 对无 BOM 的 .ps1 按 ANSI（GBK）解码，中文注释与输出会乱码；行尾走 LF 无妨。
+
+# 换行符规则跳过这些目录（第三方参考件即使本地存在也不入库）
+/baseline/ export-ignore

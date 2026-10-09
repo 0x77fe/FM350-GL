@@ -1,0 +1,22 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+STOP=10
+USE_PROCD=1
+
+start_service()
+{
+	# 配置引导（opkg postinst 在某些打包路径下不生效，此处幂等兜底）
+	[ -f /etc/config/fm350 ] || cp /usr/share/fm350/config.template /etc/config/fm350
+
+	procd_open_instance
+	procd_set_param command /usr/lib/fm350/fm350.sh daemon
+	procd_set_param respawn 3600 5 5
+	procd_set_param file /var/run/fm350/state.json
+	procd_close_instance
+}
+
+reload_service()
+{
+	restart
+}

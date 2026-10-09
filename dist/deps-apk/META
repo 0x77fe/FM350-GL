@@ -1,0 +1,7 @@
+# dist/deps-apk 元数据：固件版本、目标架构、包架构、内核包版本与 kmods ABI
+# download.sh / install_all.sh 共同读取，避免版本与 ABI 分散在多处
+FM350_VER=25.12.1
+FM350_TARGET=x86/64
+FM350_PKGARCH=x86_64
+FM350_KERNEL=6.12.94~0413601b
+FM350_ABI=6.12.94-1-0413601b1c3f0490e17f340fe09229ea
