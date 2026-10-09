@@ -116,10 +116,14 @@ echo "[4/6] 重启 rpcd（否则 ubus 对象 fm350 不注册，页面全空）"
 /etc/init.d/rpcd restart
 sleep 2
 
-echo "[5/6] uhttpd 防缓存 + 启用并启动守护"
+echo "[5/6] uhttpd 与静态资源缓存"
+# LuCI 静态 JS 在本固件上不带 Cache-Control（uhttpd 的 no_cache 选项不生效），
+# 资源 URL 形如 ?v=<luciversion>-<包数据库 mtime>，只在装包后变化；
+# 装包本身已让它变化，这里再 touch 文件刷新 ETag，并提示升级后强制刷新一次。
 uci -q get uhttpd.main.no_cache | grep -q js || { uci set uhttpd.main.no_cache='js'; uci commit uhttpd; }
 /etc/init.d/uhttpd restart >/dev/null 2>&1 || true
 touch /www/luci-static/resources/view/fm350/*.js /www/luci-static/resources/fm350/*.js 2>/dev/null || true
+echo "  提示：浏览器仍显示旧界面或报错时，请强制刷新一次（Ctrl+Shift+R）"
 # stop → 停顿 → start：procd 对 restart 的 stop/start 竞争会产生双实例记录
 /etc/init.d/fm350mgr stop 2>/dev/null || true
 sleep 2

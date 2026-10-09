@@ -30,10 +30,13 @@ opkg install "$IPK"
 echo "[3/6] 重启 rpcd 与 uhttpd"
 /etc/init.d/rpcd restart
 sleep 2
-# 静态资源走"每次请求重新验证"，避免浏览器启发式缓存旧版 JS
+# LuCI 静态 JS 在本固件上不带 Cache-Control（uhttpd 的 no_cache 选项不生效），
+# 资源 URL 形如 ?v=<luciversion>-<包数据库 mtime>，装包后才会变化；
+# 这里再 touch 一次刷新 ETag，并提示升级后强制刷新浏览器。
 uci -q get uhttpd.main.no_cache | grep -q js || { uci set uhttpd.main.no_cache='js'; uci commit uhttpd; }
 /etc/init.d/uhttpd restart >/dev/null 2>&1 || true
 touch /www/luci-static/resources/view/fm350/*.js /www/luci-static/resources/fm350/*.js 2>/dev/null || true
+echo "  提示：浏览器仍显示旧界面或报错时，请强制刷新一次（Ctrl+Shift+R）"
 
 echo "[4/6] 启用并启动守护"
 /etc/init.d/fm350mgr disable 2>/dev/null || true

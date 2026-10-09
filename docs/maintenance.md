@@ -53,6 +53,7 @@ FM350_CURL_OPTS=--ssl-no-revoke sh dist/deps-apk/download.sh # Git Bash 证书�
 - 升级主包：路由器上执行同目录 `install_all.sh`，或 `apk add --allow-untrusted <包>` / `opkg install <包>`。
 - 安装后 `rpcd` 必须重启，否则 ubus 对象 `fm350` 不注册，页面无数据。
 - 守护操作只用 `/etc/init.d/fm350mgr restart`。
+- 升级后浏览器可能继续使用旧的前端副本：LuCI 静态 JS 在这些固件上不带 `Cache-Control`（`uhttpd` 的 `no_cache` 选项不生效），资源 URL 形如 `?v=<luciversion>-<包数据库 mtime>`，只在装包后变化。升级脚本会 touch JS 文件刷新 ETag 并提示强制刷新；页面仍异常时先按 Ctrl+Shift+R 或在开发者工具里勾选 Disable cache 再刷新，再确认已装文件与源码一致（`tests/installed-content.sh`）。
 - 24.10 老 modem 链路（luci-app-modem / ModemManager）：`deploy/install_fm350.sh` 默认调用 `deploy/migrate_modem.sh`，可用 `FM350_SKIP_MIGRATE=1` 跳过，`FM350_MIGRATE_BACKUP=<目录>` 指定备份位置。迁移把旧脚本、rc 链接、热插拔脚本与 `/etc/config/modem` 移入 `/root/backup/fm350-legacy-<时间戳>`，并生成 `MANIFEST` 与 `rollback.sh`；还原用 `sh deploy/rollback_fm350.sh [备份目录]`，不依赖 `/var/trash`。
 
 ## 发布

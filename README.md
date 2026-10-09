@@ -58,7 +58,7 @@ ssh root@<router> "sh /tmp/deps-apk/install_all.sh"
 |---|---|
 | 概览显示「模块离线」 | 检查 USB 供电与线缆；`sh /usr/lib/fm350/fm350.sh check` 查看发现结果 |
 | 页面全空、状态一直不变 | rpcd 未加载后端：`/etc/init.d/rpcd restart` |
-| 部署后仍是旧界面 | uhttpd 缓存：`uci set uhttpd.main.no_cache='js'` 并重启 uhttpd，或强制刷新浏览器 |
+| 部署后仍是旧界面或页面报错 | 本固件的 LuCI 静态 JS 不带 Cache-Control，浏览器会继续用旧副本：强制刷新一次（Ctrl+Shift+R），或在开发者工具里勾选 Disable cache 后刷新 |
 | kmod 装不上 / ABI 报错 | 离线目录的 `META` 与固件内核不一致，按 [docs/maintenance.md](docs/maintenance.md) 重抓对应版本 |
 | 取主包失败（GitHub 不可达） | `FM350_RELEASE_BASE=<镜像前缀>` 换源；或在构建机自编后拷入离线目录并用 `FM350_LOCAL_APP=1` 放行 |
 | Git Bash 报 `curl: (35) CRYPT_E_REVOCATION_OFFLINE` | `FM350_CURL_OPTS=--ssl-no-revoke sh download.sh`，或改用 `download.ps1` |
