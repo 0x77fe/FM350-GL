@@ -1,22 +1,22 @@
 # FM350-GL 管理器（luci-app-fm350）
 
-ImmortalWrt 上的 Fibocom FM350-GL 5G 模组管理器：拨号生命周期的唯一 owner、分级自动恢复、模组全自动发现、LuCI 中文管理界面。
+ImmortalWrt 上的 Fibocom FM350-GL 5G 模组管理器。
 
-针对固件层面无法修复的缺陷：随机 USB 断开或数据面假死（AT 与 PDP 正常但计数冻结）、长时间运行后 IPv6 不再刷新、模组拔插后编号漂移。管理器把这些问题变成可配置的感知与分级恢复。
+针对当前 FM3500-GL 的断流缺陷，对几种情况做了特化应对。
 
 | 项 | 值 |
 |---|---|
 | 目标固件 | ImmortalWrt 24.10.x x86_64（kernel 6.6.122 · opkg）与 25.12.x x86_64（kernel 6.12.94 · apk） |
-| 模组 | Fibocom FM350-GL，USB `0e8d:7127`（VID:PID 可留空自动识别） |
-| 数据面 | RNDIS → `ethX`，netifd 静态 IPv4 + dhcpv6（odhcp6c） |
+| 模组 | Fibocom FM350-GL |
+| 数据 | RNDIS → `ethX`，netifd 静态 IPv4 + dhcpv6（odhcp6c） |
 | 默认业务链路 | AT 口自动探测、APN `ctnet`、PDP `ipv4v6`、上下文 3 |
-| 包 | `luci-app-fm350`，`PKGARCH=all`，GPL-3.0-only |
+| 包 | `luci-app-fm350`，`PKGARCH=all`，GPL-3.0 |
 | 预编译包 | [Releases](https://github.com/0x77fe/FM350-GL/releases/latest)（apk 与 ipk 成对发布，见 [docs/maintenance.md](docs/maintenance.md)） |
 | 菜单 | 服务 → FM350 管理：状态总览、详情表、AT 命令、拨号管理、设置、日志 |
 
 ## 快速安装
 
-路由器不联网时用离线目录（仓库不含二进制，依赖由下载脚本按清单从官方镜像取回，主包按 `APP-SHA256SUMS` 从 Release 取回）。
+路由器不联网时用离线目录，仓库不含依赖二进制，由下载脚本按清单从官方镜像取回，主包按 `APP-SHA256SUMS` 从 Release 取回。
 
 **24.10 / opkg**
 
@@ -50,7 +50,6 @@ ssh root@<router> "sh /tmp/deps-apk/install_all.sh"
 
 - 已按 AT 手册实现并以模拟响应验证的字段：`AT+CGPADDR`（权威 IPv4）、`AT+GTDNS`（运营商 DNS）、`AT+GTCCINFO`（小区与信号）、`AT+CESQ`（SS-RSRP/SS-RSRQ/SS-SINR）、`AT+GTCAINFO`（载波聚合）。r44 生产验证已确认真实 CGPADDR/GTDNS 响应、成功自动拨号和双栈联网，其余字段仍需更多真实样本验证。
 - 厂商私有调用仅用于取信息：DNS 查询失败使用公共兜底；小区、信号与 CA 查询失败清除对应快照并显示不可用，合法但未完全解析的响应保留原始回显。
-- 待完整硬件演练：USB 重枚举后的恢复、数据面假死、运营商侧 IPv6 恢复及长时间稳定性。单次生产拨号与联网成功不能替代这些演练，见 [docs/maintenance.md](docs/maintenance.md)。
 
 ## 常见问题
 
@@ -73,4 +72,4 @@ ssh root@<router> "sh /tmp/deps-apk/install_all.sh"
 
 ## 许可
 
-GPL-3.0-only。
+GPL-3.0。
